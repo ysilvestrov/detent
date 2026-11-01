@@ -2,7 +2,7 @@
 // project and `home`, plans everything first (src/install/plan.ts), and writes only when the
 // plan has no conflict: exit 4 means nothing at all was written. Nothing is ever deleted.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TARGETS, parseInstallArgs, type Target } from '../install/args.js';
@@ -51,10 +51,44 @@ function filesUnder(dir: string, prefix = ''): string[] {
   return out.sort();
 }
 
-// Names of the directories directly under `dir`; none when it does not exist.
+// Names of the directories directly under `dir`; none when it does not exist. A link to a
+// directory counts: a skill or a plugin is often linked in rather than copied.
 function dirNames(dir: string): string[] {
   if (!existsSync(dir)) return [];
-  return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  const isDir = (name: string) => {
+    try {
+      return statSync(join(dir, name)).isDirectory();
+    } catch {
+      return false; // a dangling link
+    }
+  };
+  return readdirSync(dir).filter(isDir).sort();
+}
+
+// Two target paths that are one file or directory on disk (a symlink, a junction, a hard link)
+// would get two different texts written through each other, and the manifest would record a
+// state that is not on disk. A dangling link would be written through too.
+function aliasError(root: string, a: string, b: string): string | null {
+  const id = (path: string): string | null => {
+    const file = onDisk(root, path);
+    let link: boolean;
+    try {
+      link = lstatSync(file).isSymbolicLink();
+    } catch {
+      return null; // absent
+    }
+    try {
+      const s = statSync(file, { bigint: true });
+      return `${s.dev}:${s.ino}`;
+    } catch {
+      if (link) throw new Error(`${path} is a link to a missing file or directory; remove the link or create its target`);
+      return null;
+    }
+  };
+  const ia = id(a);
+  return ia !== null && ia === id(b)
+    ? `${a} and ${b} are the same on disk (a link); install one target: --claude or --agents`
+    : null;
 }
 
 const readOrNull = (path: string): string | null => (existsSync(path) ? readFileSync(path, 'utf8') : null);
@@ -82,6 +116,15 @@ export function install(argv: readonly string[], io: InstallIo): number {
     root = gitToplevel(io.cwd, io.env);
   } catch (error) {
     return fail(EXIT.usage, messageOf(error));
+  }
+
+  if (opts.targets.length === TARGETS.length) {
+    try {
+      const alias = aliasError(root, 'CLAUDE.md', 'AGENTS.md') ?? aliasError(root, '.claude/skills', '.agents/skills');
+      if (alias !== null) return fail(EXIT.usage, alias);
+    } catch (error) {
+      return fail(EXIT.usage, messageOf(error));
+    }
   }
 
   // Everything is read before anything is planned, let alone written.

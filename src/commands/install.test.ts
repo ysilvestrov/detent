@@ -4,7 +4,7 @@
 import { describe, test, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -283,6 +283,50 @@ describe('install: the detent plugin enabled in the project', () => {
     s.putRepo('.claude/settings.json', '{ "enabledPlugins": { "detent@x": true } }\n');
     expect(s.run(['--agents'])).toBe(0);
     expect(s.err()).toEqual([]);
+    expect(s.tree()).toEqual([...AGENTS_SKILLS, '.claude/settings.json', '.detent/manifest.json', '.gitignore', 'AGENTS.md', 'detent.json']);
+  }, E2E_TIMEOUT);
+});
+
+// Links are made with what Windows allows without admin rights: a hard link for a file, a
+// junction for a directory (the type is ignored on POSIX, where it is a plain symlink).
+describe('install: target paths that are one thing on disk', () => {
+  test('CLAUDE.md hard-linked to AGENTS.md: exit 2, nothing written', () => {
+    const s = setup();
+    s.putRepo('AGENTS.md', '# shared\n');
+    linkSync(join(s.repo, 'AGENTS.md'), join(s.repo, 'CLAUDE.md'));
+    const before = s.snapshot();
+    expect(s.run([])).toBe(2);
+    expect(s.err()).toEqual(['install: CLAUDE.md and AGENTS.md are the same on disk (a link); install one target: --claude or --agents']);
+    expect(s.snapshot()).toEqual(before);
+  }, E2E_TIMEOUT);
+
+  test('.claude/skills linked to .agents/skills: exit 2, nothing written', () => {
+    const s = setup();
+    s.putRepo('.agents/skills/mine/SKILL.md', 'mine\n');
+    mkdirSync(join(s.repo, '.claude'));
+    symlinkSync(join(s.repo, '.agents', 'skills'), join(s.repo, '.claude', 'skills'), 'junction');
+    expect(s.run([])).toBe(2);
+    expect(s.err()).toEqual(['install: .claude/skills and .agents/skills are the same on disk (a link); install one target: --claude or --agents']);
+    expect(s.tree()).toEqual(['.agents/skills/mine/SKILL.md', '.claude/skills']); // tree() lists a link, it does not follow it
+  }, E2E_TIMEOUT);
+
+  test('one target alone is not checked for aliases: the link is that target\'s own business', () => {
+    const s = setup();
+    s.putRepo('AGENTS.md', '# shared\n');
+    linkSync(join(s.repo, 'AGENTS.md'), join(s.repo, 'CLAUDE.md'));
+    expect(s.run(['--claude'])).toBe(0);
+    expect(s.read('AGENTS.md')).toBe(s.read('CLAUDE.md'));
+  }, E2E_TIMEOUT);
+});
+
+describe('install: a Superpowers skill linked into .agents/skills', () => {
+  test('a linked using-superpowers directory counts as found', () => {
+    const s = setup();
+    s.putHome('superpowers/skills/using-superpowers/SKILL.md', 'sp\n');
+    mkdirSync(join(s.repo, '.agents', 'skills'), { recursive: true });
+    symlinkSync(join(s.home, 'superpowers', 'skills', 'using-superpowers'), join(s.repo, '.agents', 'skills', 'using-superpowers'), 'junction');
+    expect(s.run(['--agents', '--dry-run'])).toBe(0);
+    expect(s.out()).toContain('dry-run: agents: Superpowers found (.agents/skills/using-superpowers/); detent-dev-cycle line in AGENTS.md: no');
   }, E2E_TIMEOUT);
 });
 
