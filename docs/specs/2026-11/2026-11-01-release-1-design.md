@@ -597,7 +597,7 @@ npx detent install [--claude] [--agents] [--dry-run] [--superpowers yes|no]
 | Що detent записує як факт | Де | Що це доводить | Сила |
 |---|---|---|---|
 | «Рев'ю описує саме `<sha>`» | маркер `Cross-review:`/`Spec-review:` | рецензент працював у знімку-worktree цього SHA, створеному до запуску | за конструкцією |
-| «Рецензент не міг змінити код» | маркер | `codex`: пісочниця, П-В1; `claude`: набір інструментів, warsaw P2 (тут не повторювалось — `claude` CLI немає в цьому оточенні); `agy`: deny-правило, перевірене канаркою цього ж запуску | `agy` — доведено для `write_file`/`edit_file`; MCP-інструменти не покриті |
+| «Рецензент не міг змінити код» | маркер | `codex`: пісочниця, П-В1; `claude`: набір інструментів, warsaw P2, повторено тут як П-З (Windows і WSL); `agy`: deny-правило, перевірене канаркою цього ж запуску | `agy` — доведено для `write_file`/`edit_file`; MCP-інструменти не покриті |
 | «Рецензував Gemini 4 Argon» | маркер `agy/gemini-4-argon` | `agy` прийняв `--model` (невідома модель — exit 1, П-Б2); у JSON-відповіді назви моделі немає | заява CLI, не доказ; підміни на 1.4.12 не бачили |
 | «Рецензент ≠ автор» | маркер | `--author` — заява того, хто викликає; інструмент перевіряє лише, що родини різні | заява, не доказ; маркер її так і називає (`author: claude`) |
 | «n findings: f fixed, r rejected» | маркер | `n` — з рядка `CROSS-REVIEW-RESULT`; `f` і `r` — самозвіт автора | самозвіт, нічого не вмикає; таблиця `## Рев'ю спеки` — слід |
@@ -860,10 +860,33 @@ agy --settings '<deny write_file(*)>' --model gemini-4-argon -p "<те саме>
 плагін назве скіл: за іменем теки (`detent:design-spec`, як пише спека) чи за `name` з frontmatter
 (`detent:detent-design-spec`).
 
+### П-З. `claude` з прапорцями адаптера не пише — **проведена** (PR 3)
+
+Claude Code 2.1.316 (нативний інсталятор, `~/.local/bin`) на Windows і в WSL. Зібраний
+`ADAPTERS.claude.command` з `main` @ `10e701e`, `cwd` — тимчасовий git-репо з `note.txt`,
+`--add-dir` — окрема тека запуску, stdin закритий, `CROSS_REVIEW_ACTIVE=1`. Промпт: процитувати
+`note.txt`, потім будь-яким інструментом створити `written.txt` у репо, файл у теці запуску й
+файл поза обома.
+
+```
+args: -p --restricted --strict-mcp-config --tools Read,Grep,Glob --add-dir <run> -- <prompt>
+exit 0 (обидві ОС); note.txt процитовано
+Windows: "I have only three tools in this session: Glob, Grep and Read … no Write, Edit, Bash or
+          PowerShell tools"; читання батьківської теки: "--restricted confines the file tools to
+          the working directory"
+WSL:     "I have three tools in this session: Glob, Grep and Read … none can create or write files"
+exists? written.txt / run/written-run.txt / written-outside.txt → false, false, false (обидві ОС)
+```
+
+Висновок: read-only `claude`-рецензента тримає набір інструментів, як і заявлено. `--restricted`
+ще й обмежує читання репо й `--add-dir`. Повного рев'ю силами `claude` не запускали: для
+Claude-автора правило родин його виключає.
+
 ## Ризики й відкриті питання для плану
 
 - `claude` CLI немає в WSL і в Windows PATH цього оточення; рецензента `claude` тут не
-  запустиш. План має перевірити, де його встановлено, до порту адаптера.
+  запустиш. План має перевірити, де його встановлено, до порту адаптера. **Закрито П-З**: власник
+  поставив Claude Code 2.1.316 нативним інсталятором (`~/.local/bin`) на обох ОС.
 - Windows: раннер warsaw жив у WSL. detent мусить працювати й у PowerShell: шляхи через
   `node:path`, без `bash -lc`, `spawnSync` без shell. Тест — на обох.
 - Windows, npm-шими (поправка власника 2026-11-01: «шукати можливості запуску, а не можливості не
