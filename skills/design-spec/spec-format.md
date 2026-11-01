@@ -63,7 +63,7 @@ product's users or for the project's resources, not the mechanism. Fields in thi
 | Key decisions | 3–5 decisions that are expensive to undo, each with the rejected alternative; plus "Considered the standard: X — rejected because Y" for each standard alternative considered | A body decision that changes visible behaviour, the operational regime, access rights, or is irreversible must be here |
 | What gets worse | Cost, losses, new risks | Required, not empty |
 | Estimate | The owner's estimate, the author's estimate, the breakdown, the cheaper option; after merge, "Actual" | See "Estimate" |
-| Questions for the owner | At most three | "None" is allowed |
+| Questions for the owner | At most three; with Superpowers, these include the builder check's questions only the owner can answer | "None" is allowed |
 
 `[inference]` is where the owner should look first: that is where the author could be wrong.
 

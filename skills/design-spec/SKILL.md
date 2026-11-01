@@ -14,7 +14,8 @@ and premise tags included (`spec-format.md` → "Language"). Save it under
 ## Order of work
 
 1. **Estimate game, first half.** Retell the task in your own words and ask the owner for their
-   size estimate (XS–XL, scale in `spec-format.md`). Do not name yours or hint at it.
+   size estimate (XS–XL, scale in `spec-format.md`). Do not name yours or hint at it. With
+   Superpowers, this question ends your first message.
 2. **Probes.** Before writing a premise as fact, check it: reproduce, measure, run the tool.
    Each premise gets a tag: owner requirement, probe (pointing at the probe in the body), or
    inference.
@@ -26,12 +27,16 @@ and premise tags included (`spec-format.md` → "Language"). Save it under
 5. **Claim → evidence table.** One row per place the system records something as fact. A row
    whose evidence is a counter, an assumption about external data or "it has always been so"
    is weak: probe it now, or drop the claim.
-6. **Commit, then cross-review.** Run `npx detent cross-review --spec <file>` per the
+6. **Builder check** (with Superpowers): run its builder check on the written spec. Settle what
+   is already answered or minor yourself; put what only the owner can answer into "Questions for
+   the owner". More than three such questions means the spec is not ready: ask the owner before
+   the cross-review, in one message.
+7. **Commit, then cross-review.** Run `npx detent cross-review --spec <file>` per the
    `detent-cross-review` skill. Fix or reject each finding with a reason. Put the printed
    `Spec-review:` line in the header (fill in fixed / rejected) and the decision table in the
    last section. Set the status to "awaiting approval", commit, and hand the spec to the owner.
    If the review failed, say so to the owner in your message.
-7. **Amendments** after approval follow `spec-format.md` → "Amendments"; they do not rerun the
+8. **Amendments** after approval follow `spec-format.md` → "Amendments"; they do not rerun the
    review.
-8. **After the last PR of the change is merged**, add "Actual: <size>, <n> PRs, <m> tasks" to
+9. **After the last PR of the change is merged**, add "Actual: <size>, <n> PRs, <m> tasks" to
    the estimate.
