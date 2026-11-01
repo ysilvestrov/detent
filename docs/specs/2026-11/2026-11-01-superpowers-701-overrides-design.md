@@ -1,7 +1,8 @@
 # Override-и для Superpowers 7.0.1: оцінка, builder check і решта колізій процесу
 
 Дата: 2026-11-01
-Статус: чернетка
+Статус: чекає на затвердження
+Spec-review: codex/gpt-6.1-sol @ 7a2ae9d (author: claude) — 4 findings: 4 fixed, 0 rejected
 
 ## Для власника
 
@@ -12,10 +13,15 @@
 **Що зміниться для тебе.**
 - У першому ж повідомленні brainstorming агент питає твою оцінку XS–XL, а не називає свою.
 - Спека приходить до тебе після двох перевірок: «будівельник» (субагент Superpowers, та сама
-  родина) і cross-review (інша родина). Окремого раунду питань від «будівельника» не буде: те,
-  що може вирішити лише ти, стоїть у «Питаннях до власника» самої спеки.
+  родина) і cross-review (інша родина). Зазвичай окремого раунду питань від «будівельника» не
+  буде: до трьох питань, які може вирішити лише ти, стоять у «Питаннях до власника» самої
+  спеки. Якщо таких питань більше трьох, агент питає тебе **до** cross-review: спека ще не
+  готова.
 - Після плану агент **не питає** тебе, чи переглянув ти план і яким способом виконувати: обирає
   сам за `detent-pr-slicing` і каже одним рядком. Заперечити можна, чекати — ні.
+- Виконання плану без тебе тепер має ще одну зупинку: якщо рішення під час реалізації змінює
+  секцію «Для власника» затвердженої спеки, агент зупиняється, бо це поправка, яка повертає
+  спеку тобі на затвердження. Поправка лише в тілі спеки виконання не зупиняє.
 - Агент більше не робить `rm -rf` робочої теки плану після фінального рев'ю.
 - Конституція в CLAUDE.md/AGENTS.md кожного проєкту виросте приблизно на 15 рядків.
 - Незворотного нічого: `v0.2.1` ставиться в проєкти окремим кроком.
@@ -28,8 +34,9 @@
    колізію. `[проба]` (П-2)
 3. «Будівельник» і cross-review ловлять різне: перший — де планувальнику довелося б гадати,
    другий — шість перевірок `review-spec.md`, серед яких цього немає. `[проба]` (П-3)
-4. Superpowers у Claude Code має ту саму версію 7.0.1, що й у кеші Codex, де його читали.
-   `[виведення]`
+4. Override-и звіряються з релізом Superpowers 7.0.1, а не з конкретною установкою. На цій
+   машині він стоїть лише в Codex (Windows і WSL, обидва 7.0.1); у Claude Code його немає, тож
+   поведінку в Claude Code ніхто не спостерігав. `[проба]` (П-6)
 5. Поведінку override-и називають, назв розділів не згадують. `[вимога власника]`
 6. Специ й плани лежать у місячних підтеках, ніколи пласко: за місяць навіть невеликий проєкт
    набирає до сотні задач, і за рік у пласкій теці не знайти нічого. `[вимога власника]`
@@ -110,6 +117,10 @@ override потрібен лише на коміти.
 `*` (create-only). Тобто тека поза `git status` без жодної правки інсталятора detent; не
 видаляти її — безпечно, вона лише накопичує дрібні текстові файли планів.
 
+**П-6. Де стоїть Superpowers.** Пошук у `~/.claude/plugins` (Windows і WSL) і в
+`settings.json` Claude Code: Superpowers немає. `~/.codex/plugins/cache/openai-curated-remote/
+superpowers/`: `7.0.1` і на Windows, і у WSL.
+
 ## Рішення автора після builder check
 
 - **Ціль PR.** `baseBranch` за замовчуванням `origin/main` — це ref для рібейсу. PR відкривається
@@ -131,7 +142,7 @@ override потрібен лише на коміти.
 | K6 | writing-plans | Після плану просить власника переглянути його й вибрати SDD чи Native | Власник затверджує спеку; про план нічого | Override: не питати; спосіб обрати за `detent-pr-slicing` і назвати одним рядком (рішення 4) |
 | K7 | SDD, executing-plans | Після останньої задачі — фінальне рев'ю, потім `finishing` і PR | Ядро → наскрізне рев'ю → план обв'язки → … → PR після останнього плану | Override: фінальне рев'ю плану ядра і є наскрізним рев'ю; далі план обв'язки, `finishing` лише після останнього плану |
 | K8 | SDD | BASE береться перед диспатчем імплементера наступної задачі | Інлайн-задача **мусить** увійти в review-пакет наступної | Правка `detent-pr-slicing`: BASE фіксується перед інлайн-задачею й переходить у пакет наступної |
-| K9 | SDD, executing-plans | «Rulings, not stalls»: конфлікти вирішує контролер і йде далі; стоп лише на чотири речі | Нове речення в спеці або зміна секції власника — поправка, статус «чекає на затвердження» | Override: таке рішення — п'ята причина зупинки |
+| K9 | SDD, executing-plans | «Rulings, not stalls»: конфлікти вирішує контролер і йде далі; стоп лише на чотири речі | Поправка, що змінює секцію власника, повертає статус «чекає на затвердження» (`spec-format.md` → «Amendments») | Override: таке рішення — п'ята причина зупинки. Поправка лише тіла — ні, як і в `spec-format.md` |
 | K10 | SDD, executing-plans | `rm -rf <workspace>` після чистого фінального рев'ю | П. 8: рекурсивне видалення лише скриптом після dry-run | Override: робочу теку не видаляти (вона ігнорується git'ом, П-5), прибирання — за п. 8 |
 | K11 | finishing | Питає базову гілку; PR — пуш і відкриття; порядку з рев'ю немає | Рібейс на `baseBranch`, гейт, cross-review, маркер, потім PR | Розширити наявний override: базова гілка з `detent.json`; порядок рібейс → гейт → cross-review → PR |
 
@@ -169,11 +180,13 @@ override потрібен лише на коміти.
    - `superpowers:writing-plans`: slice the plan per `detent-pr-slicing` and save it under
      `<plansDir>/<YYYY-MM>/`. Do not ask the owner to review the plan or pick an execution method:
      pick it per `detent-pr-slicing` and say which in one line.
-   - `superpowers:subagent-driven-development` and `superpowers:executing-plans`: do a small task
-     inline (the conditions are in `detent-pr-slicing`). The final review of a core plan is its
-     end-to-end review: write the harness plan next, and finish the branch only after the last
-     plan. A ruling that would need a new sentence in the spec or change its owner section stops
-     the run: it is a spec amendment. Never delete the plan's workspace; rule 8 applies.
+   - `superpowers:subagent-driven-development`: do a small task inline (the conditions are in
+     `detent-pr-slicing`) instead of dispatching it.
+   - `superpowers:subagent-driven-development` and `superpowers:executing-plans`: the final
+     review of a core plan is its end-to-end review: write the harness plan next, and finish the
+     branch only after the last plan. A ruling that would change the spec's owner section stops
+     the run: it is an amendment that returns the spec for approval. Never delete the plan's
+     workspace; rule 8 applies.
    - `superpowers:finishing-a-development-branch`: do not ask for the base branch: rebase on
      `baseBranch`, run the gate, run `cross-review`, then open the PR by default, without asking,
      against the branch `baseBranch` names (without the remote). Only a human merges.
@@ -184,7 +197,7 @@ override потрібен лише на коміти.
 - новий крок між 5 і 6: «**Builder check** (with Superpowers): run its builder check on the
   written spec. Settle what is already answered or minor yourself; put what only the owner can
   answer into "Questions for the owner". More than three such questions means the spec is not
-  ready: ask them before writing on.»
+  ready: ask the owner before the cross-review, in one message.»
 
 `spec-format.md`, поле «Questions for the owner»: «At most three; with Superpowers, these include
 the builder check's questions only the owner can answer».
@@ -195,6 +208,8 @@ the builder check's questions only the owner can answer».
   review.»
 - «Inline or dispatch»: «Record the base commit before the inline task, so that the next task's
   review package starts from it.»
+- «Inline or dispatch»: «With `superpowers:executing-plans` every task is done inline; the
+  dispatch rule applies only to `superpowers:subagent-driven-development`.»
 
 Тести `src/content.test.ts` фіксують по одному рядку на кожен override (як наявний тест на
 «checked against Superpowers 7.0.1»), список семи скілів у конституції і `<plansDir>/<YYYY-MM>/`
@@ -212,3 +227,14 @@ Superpowers 7.0.1» з переліком семи скілів, тег `v0.2.1`
 | Робочу теку плану можна не видаляти: вона не потрапить у коміт | п. 7 («Never delete the plan's workspace») | П-5: `sdd-workspace` створює самоігнорований `.gitignore` | сильна для 7.0.1 |
 
 ## Рев'ю спеки
+
+Перший запуск (Windows) — `Spec-review: failed (author: claude; codex: not installed; agy: output
+does not end with a CROSS-REVIEW-RESULT line)`: `codex` є лише у WSL, `agy` у headless-режимі
+дістав автовідмову на дозвіл `command`. Повторено з WSL-копії.
+
+| # | Перевірка | Рішення | Причина / що змінено |
+|---|---|---|---|
+| 1 | 1 (тіло → резюме) | виправлено | Нову зупинку виконання винесено в «Що зміниться для тебе»; звужено до поправки, що змінює секцію власника, — так само, як у `spec-format.md` → «Amendments» (K9, текст override) |
+| 2 | 3 (суперечність) | виправлено | Секція власника каже «зазвичай»: понад три питання, які може вирішити лише власник, ідуть одним повідомленням до cross-review |
+| 3 | 6 (дефект дизайну) | виправлено | Правило «інлайн або диспатч» обмежено SDD; для `executing-plans` — усе інлайн (override і `detent-pr-slicing`) |
+| 4 | 2 (засновки) | виправлено | Засновок 4 перевірено пробою П-6: у Claude Code Superpowers не встановлено; засновок переписано як `[проба]` про реліз, а не установку |
