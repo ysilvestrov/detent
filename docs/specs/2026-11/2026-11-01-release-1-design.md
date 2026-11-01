@@ -795,6 +795,31 @@ spawnSync(process.execPath, ['<script>', 'x', prompt]) status=0, argv[1] === pro
 Висновок: `.cmd` без shell не запускається; розгорнутий у `node <script>` — запускається, і
 багаторядковий аргумент зі спецсимволами cmd доходить байт у байт.
 
+### П-Е. Установка з git-тегу в чистий проєкт — **проведена** (перед планом обв'язки)
+
+Тег `v0.1.0` → `958b994` (мердж PR #1). Чистий проєкт (`package.json` без залежностей),
+`npm i -D github:ysilvestrov/detent#v0.1.0`, далі `npx detent --version` і `npx detent`.
+
+```
+Windows (npm 11.20.0, Node 26.12.1, Git Bash)   WSL (npm 11.19.1, Node 24.22.2)
+install exit=0, "added 1 package"               install exit=0
+node_modules/detent/dist/{cli.js,commands,…}    те саме; .bin/detent -> ../detent/dist/cli.js
+.bin/detent, detent.cmd, detent.ps1             
+npx detent --version → 0.1.0, exit 0            npx detent --version → 0.1.0, exit 0
+npx detent → usage, exit 2
+lock: resolved git+ssh://git@github.com/ysilvestrov/detent.git#958b994…   (обидві ОС)
+```
+
+На обох ОС npm 11.19+ друкує попередження
+`install-scripts … detent@0.1.0 (prepare: npm run build) … not yet covered by allowScripts`.
+Але `dist/` зібрано: `prepare` відпрацював, коли npm пакував git-залежність. `npm install-scripts ls`
+після установки каже `No packages with unreviewed install scripts`.
+
+Висновок: `prepare` при установці з git працює, тож `dist/` у тег **не комітиться**. Залишкові
+ризики: попередження `allowScripts` — ознака, що npm посилює політику скриптів, і якщо колись
+воно стане блокувальним, запасна дорога та сама (`dist/` у тег). Ще одне: `resolved` записано як
+`git+ssh`. На машині без SSH-ключа до GitHub установку не перевіряли.
+
 ## Ризики й відкриті питання для плану
 
 - `claude` CLI немає в WSL і в Windows PATH цього оточення; рецензента `claude` тут не
