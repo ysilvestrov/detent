@@ -33,7 +33,7 @@ function filesUnder(dir: string): string[] {
 
 describe('skills', () => {
   test('the skill set', () => {
-    expect(skillDirs).toEqual(['design-spec']);
+    expect(skillDirs).toEqual(['cross-review', 'design-spec', 'dev-cycle', 'pr-slicing']);
   });
 
   test.each(skillDirs)('skills/%s/SKILL.md: name is detent-<dir>, lower-case and dashes', (dir) => {
@@ -65,6 +65,71 @@ describe('design-spec skill', () => {
     const format = read('skills/design-spec/spec-format.md');
     expect(format.includes('| L | 2–3 PRs, or a step a human performs outside the repo |')).toBe(true);
     expect(format.includes("what changes for the product's users or for the project's resources")).toBe(true);
+  });
+});
+
+describe('pr-slicing skill', () => {
+  const skill = read('skills/pr-slicing/SKILL.md');
+  test('states the process point', () => {
+    expect(frontmatter(skill).description!.startsWith('Use when writing an implementation plan or deciding how to cut a change into PRs')).toBe(true);
+  });
+  test('carries the three inline conditions', () => {
+    expect(skill.match(/^- \([abc]\) .*$/gm)).toEqual([
+      '- (a) the plan\'s text for the task contains the complete code;',
+      '- (b) it touches at most two files plus their tests;',
+      '- (c) it needs no new decision.',
+    ]);
+  });
+});
+
+describe('cross-review skill', () => {
+  const skill = read('skills/cross-review/SKILL.md');
+  test('states the process point', () => {
+    expect(frontmatter(skill).description!.startsWith('Use when a design spec is committed')).toBe(true);
+  });
+  test('has exactly one pair of author markers', () => {
+    expect(skill.match(/<!-- detent:author (?:begin|end) -->/g)).toEqual(['<!-- detent:author begin -->', '<!-- detent:author end -->']);
+  });
+  test('between the markers: the Claude author line', () => {
+    const m = /<!-- detent:author begin -->\r?\n([\s\S]*?)\r?\n<!-- detent:author end -->/.exec(skill);
+    expect(m![1]).toBe('You are Claude: pass --author claude.');
+  });
+  test('names --reviewer once, as the flag never to pass', () => {
+    expect(skill.split('--reviewer').length).toBe(2);
+    expect(skill.includes('Never pass `--reviewer`')).toBe(true);
+  });
+  test('the commands it runs pass --author and no --reviewer', () => {
+    expect(skill.match(/^npx detent cross-review .*$/gm)).toEqual([
+      'npx detent cross-review --author <id>                # the branch against baseBranch',
+      'npx detent cross-review --author <id> --spec <file>  # a committed spec',
+    ]);
+  });
+  test('runs in the background', () => {
+    expect(skill.includes('Run it **in the background**')).toBe(true);
+  });
+  test('reads the marker after its stdout prefix', () => {
+    expect(skill.includes('take the text after `PR marker: ` or')).toBe(true);
+    expect(skill.includes('`Spec marker: `.')).toBe(true);
+  });
+  test('docs-only PRs get the skipped marker', () => {
+    expect(skill.includes('`Cross-review: skipped (docs-only)`')).toBe(true);
+  });
+  test('on exit 5 tells the human explicitly', () => {
+    expect(skill.includes('**Tell the human explicitly in')).toBe(true);
+  });
+});
+
+describe('dev-cycle skill', () => {
+  const skill = read('skills/dev-cycle/SKILL.md');
+  test('description is exactly the explicit-only line', () => {
+    expect(frontmatter(skill).description).toBe('Only when invoked explicitly.');
+  });
+  test('the first step checks for Superpowers and hands over to its brainstorming', () => {
+    expect(skill.includes('1. **Check for Superpowers, then retell the task.** If `superpowers:brainstorming` is among your')).toBe(true);
+    expect(skill.includes('`superpowers:brainstorming`; stop following this skill.')).toBe(true);
+  });
+  test('has the five steps', () => {
+    expect(skill.match(/^\d\. \*\*/gm)).toEqual(['1. **', '2. **', '3. **', '4. **', '5. **']);
   });
 });
 
