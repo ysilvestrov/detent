@@ -1,0 +1,11 @@
+{
+  "name": "detent",
+  "owner": { "name": "Yuriy Silvestrov" },
+  "plugins": [
+    {
+      "name": "detent",
+      "source": "./",
+      "description": "Process skills for AI coding agents: design specs with an owner section, PR slicing, cross-review by another model family, and an explicit dev cycle."
+    }
+  ]
+}
