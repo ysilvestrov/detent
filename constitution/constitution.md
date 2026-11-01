@@ -55,7 +55,8 @@ at the repository root; read their values there.
        after an approach is picked.
      - Before the owner sees a spec: builder check, then `cross-review --spec`. The builder is of
        your family and is not the reviewer of rule 6; its questions only the owner can answer go
-       into the spec's questions for the owner, not a separate round.
+       into the spec's questions for the owner, not a separate round. More than three such
+       questions means the spec is not ready: ask them in one message before the cross-review.
      - A spike commits nothing. Specs go to `<specsDir>/<YYYY-MM>/`, never flat.
    - `superpowers:writing-plans`: slice the plan per `detent-pr-slicing` and save it under
      `<plansDir>/<YYYY-MM>/`. Do not ask the owner to review the plan or pick an execution method:
