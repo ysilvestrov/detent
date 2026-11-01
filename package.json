@@ -9,7 +9,9 @@
   },
   "files": [
     "dist",
-    "prompts"
+    "prompts",
+    "skills",
+    "constitution"
   ],
   "engines": {
     "node": ">=20"
