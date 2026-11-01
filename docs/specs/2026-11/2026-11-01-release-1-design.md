@@ -837,6 +837,29 @@ lock: resolved git+ssh://git@github.com/ysilvestrov/detent.git#958b994…   (о�
 воно стане блокувальним, запасна дорога та сама (`dist/` у тег). Ще одне: `resolved` записано як
 `git+ssh`. На машині без SSH-ключа до GitHub установку не перевіряли.
 
+### П-Ж. Установлені скіли підхоплюються агентами — **проведена** (PR 3)
+
+WSL, `main` @ `10e701e`, зібраний `dist/`. Чистий git-репо, `node dist/cli.js install` (обидві
+цілі), stdin кожного виклику закритий.
+
+```
+codex exec -s read-only --ephemeral "List … skills … whose name starts with detent-"
+  detent-cross-review / detent-design-spec / detent-dev-cycle / detent-pr-slicing
+agy --settings '<deny write_file(*)>' --model gemini-4-argon -p "<те саме>"
+  detent-cross-review / detent-design-spec / detent-dev-cycle / detent-pr-slicing
+
+"Using the detent-cross-review skill: which exact --author value must you pass here, and why?"
+  codex: Pass `--author codex` because I'm running as Codex; …
+  agy:   You must pass `--author agy` (per …/.agents/skills/detent-cross-review/SKILL.md#L11-L15)
+         because I am running in Antigravity on a Gemini model; …
+```
+
+Висновок: Codex 0.166 і `agy` 1.4.12 бачать усі чотири скіли з `.agents/skills/`. Обидва беруть
+рядок автора, підставлений інсталятором, і кожен вибирає своє значення `--author`. Claude Code
+(`.claude/skills/` і плагін) тут не перевірено: CLI `claude` в оточенні немає. Невідомо й те, як
+плагін назве скіл: за іменем теки (`detent:design-spec`, як пише спека) чи за `name` з frontmatter
+(`detent:detent-design-spec`).
+
 ## Ризики й відкриті питання для плану
 
 - `claude` CLI немає в WSL і в Windows PATH цього оточення; рецензента `claude` тут не
