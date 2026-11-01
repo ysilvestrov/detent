@@ -42,17 +42,34 @@ at the repository root; read their values there.
 
 7. **Superpowers overrides** (apply only when Superpowers is installed). They name behaviour, not
    branch names inside those skills, because branch names change between releases. These
-   overrides were checked against Superpowers 7.0.1; on a new Superpowers major, re-read them.
-   - `superpowers:brainstorming`: a "quick, clear task — just do it" or "small change — short
-     doc" route does not bypass classification. A behaviour change without a spec is possible
-     only on the light path (all four conditions, after the probe); everything else gets a full
-     spec per `detent-design-spec`. A human opting out of questions cancels the questions, not
-     the spec.
-   - `superpowers:writing-plans`: slice the plan per `detent-pr-slicing`.
+   overrides were checked against Superpowers 7.0.1 (brainstorming, writing-plans,
+   subagent-driven-development, executing-plans, finishing-a-development-branch,
+   using-git-worktrees, requesting-code-review); on a new Superpowers release, re-read them.
+   - `superpowers:brainstorming`:
+     - A "quick, clear task — just do it" or "small change — short doc" route does not bypass
+       classification. A behaviour change without a spec is possible only on the light path (all
+       four conditions, after the probe); everything else gets a full spec per
+       `detent-design-spec`. A human opting out of questions cancels the questions, not the spec.
+     - Sizing is the estimate game of `detent-design-spec`, not the author naming a size: the
+       question that ends your first message is the owner's size (XS–XL), and yours comes only
+       after an approach is picked.
+     - Before the owner sees a spec: builder check, then `cross-review --spec`. The builder is of
+       your family and is not the reviewer of rule 6; its questions only the owner can answer go
+       into the spec's questions for the owner, not a separate round.
+     - A spike commits nothing. Specs go to `<specsDir>/<YYYY-MM>/`, never flat.
+   - `superpowers:writing-plans`: slice the plan per `detent-pr-slicing` and save it under
+     `<plansDir>/<YYYY-MM>/`. Do not ask the owner to review the plan or pick an execution method:
+     pick it per `detent-pr-slicing` and say which in one line.
    - `superpowers:subagent-driven-development`: do a small task inline (the conditions are in
      `detent-pr-slicing`) instead of dispatching it.
-   - `superpowers:finishing-a-development-branch`: open the PR by default, without asking. Only a
-     human merges.
+   - `superpowers:subagent-driven-development` and `superpowers:executing-plans`: the final
+     review of a core plan is its end-to-end review: write the harness plan next, and finish the
+     branch only after the last plan. A ruling that would change the spec's owner section stops
+     the run: it is an amendment that returns the spec for approval. Never delete the plan's
+     workspace; rule 8 applies.
+   - `superpowers:finishing-a-development-branch`: do not ask for the base branch: rebase on
+     `baseBranch`, run the gate, run `cross-review`, then open the PR by default, without asking,
+     against the branch `baseBranch` names (without the remote). Only a human merges.
 
 8. **Deletion.** Never type a recursive delete as a command (`rm -r…`, `Remove-Item -Recurse`,
    `find -delete`, `git clean`, `rmtree` and the like). Write a script file with literal absolute

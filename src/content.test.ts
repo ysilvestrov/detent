@@ -135,8 +135,27 @@ describe('dev-cycle skill', () => {
 
 describe('constitution', () => {
   const text = read('constitution/constitution.md');
+  // Rule 7 wraps and indents its lines; the overrides are pinned on single-spaced text.
+  const flat = text.replace(/\s+/g, ' ');
   test('names the Superpowers version the overrides were checked against', () => {
     expect(text.includes('checked against Superpowers 7.0.1')).toBe(true);
+  });
+  test('names the seven Superpowers skills that were checked', () => {
+    expect(flat.includes('checked against Superpowers 7.0.1 (brainstorming, writing-plans, subagent-driven-development, executing-plans, finishing-a-development-branch, using-git-worktrees, requesting-code-review)')).toBe(true);
+  });
+  test.each([
+    ['sizing is the estimate game', "the question that ends your first message is the owner's size (XS–XL), and yours comes only after an approach is picked."],
+    ['builder check before cross-review, not a reviewer', 'Before the owner sees a spec: builder check, then `cross-review --spec`. The builder is of your family and is not the reviewer of rule 6;'],
+    ['a spike commits nothing', 'A spike commits nothing.'],
+    ['specs in monthly folders', 'Specs go to `<specsDir>/<YYYY-MM>/`, never flat.'],
+    ['plans in monthly folders', 'save it under `<plansDir>/<YYYY-MM>/`.'],
+    ['no plan review round', 'Do not ask the owner to review the plan or pick an execution method'],
+    ['the core plan ends in its end-to-end review', 'the final review of a core plan is its end-to-end review: write the harness plan next, and finish the branch only after the last plan.'],
+    ['an owner-section ruling stops the run', "A ruling that would change the spec's owner section stops the run"],
+    ['the plan workspace is not deleted', "Never delete the plan's workspace; rule 8 applies."],
+    ['finishing takes baseBranch and runs cross-review', 'do not ask for the base branch: rebase on `baseBranch`, run the gate, run `cross-review`, then open the PR by default'],
+  ])('rule 7: %s', (_name, phrase) => {
+    expect(flat.includes(phrase)).toBe(true);
   });
   test('does not name the bounded branch', () => {
     expect(text.includes('bounded')).toBe(false);
