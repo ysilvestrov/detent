@@ -61,6 +61,20 @@ describe('design-spec skill', () => {
   test('tells the agent to write in the configured language', () => {
     expect(skill.includes('Write the spec in the `language` from `detent.json`')).toBe(true);
   });
+  test('has the nine steps', () => {
+    expect(skill.match(/^\d\. \*\*/gm)).toEqual(['1. **', '2. **', '3. **', '4. **', '5. **', '6. **', '7. **', '8. **', '9. **']);
+  });
+  test('with Superpowers, the estimate question ends the first message', () => {
+    expect(skill.replace(/\s+/g, ' ').includes('Do not name yours or hint at it. With Superpowers, this question ends your first message.')).toBe(true);
+  });
+  test('the builder check runs before the cross-review and feeds the owner questions', () => {
+    expect(skill.match(/^\d\. \*\*(Builder check|Commit, then cross-review\.)\*\*/gm)).toEqual(['6. **Builder check**', '7. **Commit, then cross-review.**']);
+    expect(skill.replace(/\s+/g, ' ').includes('More than three such questions means the spec is not ready: ask the owner before the cross-review, in one message.')).toBe(true);
+  });
+  test('spec-format.md counts the builder questions among the owner questions', () => {
+    const format = read('skills/design-spec/spec-format.md');
+    expect(format.includes("| Questions for the owner | At most three; with Superpowers, these include the builder check's questions only the owner can answer | \"None\" is allowed |")).toBe(true);
+  });
   test('spec-format.md carries the generalised L size and goal', () => {
     const format = read('skills/design-spec/spec-format.md');
     expect(format.includes('| L | 2–3 PRs, or a step a human performs outside the repo |')).toBe(true);
