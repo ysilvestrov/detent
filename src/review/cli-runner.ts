@@ -37,10 +37,11 @@ function isExecutableFile(p: string): boolean {
 
 // The runner looks the binary up itself, because spawnSync without a shell cannot start a `.cmd`
 // and so cannot be left to find one (probe П-Д): PATH × PATHEXT on win32, PATH on POSIX.
-// Empty PATH entries are skipped: an empty entry would mean the current directory.
+// Empty PATH entries are skipped: an empty entry would mean the current directory. A relative
+// entry is resolved against the launching directory, because the reviewer runs in the snapshot.
 export function findExecutable(
   cmd: string,
-  o: { env: Env; platform: NodeJS.Platform; isFile?: (p: string) => boolean },
+  o: { env: Env; platform: NodeJS.Platform; cwd?: string; isFile?: (p: string) => boolean },
 ): string | null {
   const isFile = o.isFile ?? isExecutableFile;
   const win = o.platform === 'win32';
@@ -48,10 +49,11 @@ export function findExecutable(
   const exts = win
     ? (envValue(o.env, 'PATHEXT', o.platform) || DEFAULT_PATHEXT).split(';').filter((e) => e !== '')
     : [''];
-  const join = win ? win32.join : posix.join;
+  const resolve = win ? win32.resolve : posix.resolve;
+  const cwd = o.cwd ?? process.cwd();
   for (const dir of dirs) {
     for (const ext of exts) {
-      const candidate = join(dir, cmd + ext);
+      const candidate = resolve(cwd, dir, cmd + ext);
       if (isFile(candidate)) return candidate;
     }
   }
@@ -261,7 +263,11 @@ export function runAttempt(entry: ChainEntry, ctx: AttemptContext, adapters: Rea
     else ctx.progress(`cross-review: ${entry.id} — ${v.findings} finding(s). Report: ${paths.report}`);
     return v;
   } finally {
-    if (log !== '') writeFileSync(paths.log, log);
-    removeSnapshot(ctx.root, ctx.env, paths.snapshot);
+    // The snapshot goes even when the log cannot be written (a full disk): cleanup is guaranteed.
+    try {
+      if (log !== '') writeFileSync(paths.log, log);
+    } finally {
+      removeSnapshot(ctx.root, ctx.env, paths.snapshot);
+    }
   }
 }

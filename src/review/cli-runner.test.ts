@@ -72,6 +72,17 @@ describe('findExecutable on POSIX', () => {
   test('the variable name is exact on POSIX', () => {
     expect(on({ Path: '/opt/a' }, posixFiles('/opt/a/codex'))).toBeNull();
   });
+  test('a relative entry is resolved against the launching directory: the reviewer runs elsewhere', () => {
+    expect(findExecutable('codex', { env: { PATH: './tools' }, platform: 'linux', cwd: '/work/repo', isFile: posixFiles('/work/repo/tools/codex') }))
+      .toBe('/work/repo/tools/codex');
+  });
+});
+
+describe('findExecutable, relative PATH on win32', () => {
+  test('a relative entry is resolved against the launching directory', () => {
+    expect(findExecutable('codex', { env: { PATH: 'tools' }, platform: 'win32', cwd: 'C:\\work\\repo', isFile: winFiles('C:\\work\\repo\\tools\\codex.exe') }))
+      .toBe('C:\\work\\repo\\tools\\codex.EXE');
+  });
 });
 
 // The shape npm writes (probe П-Д; node_modules/.bin/*.cmd).
