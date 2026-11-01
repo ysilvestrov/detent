@@ -257,8 +257,10 @@ What release 1 has and has not proved, from the spec's claim → evidence table 
 - **Skill pickup**: Codex 0.166 and `agy` 1.4.12 see all four `detent-*` skills in
   `.agents/skills/` and each picks its own `--author` value (probed in WSL). Claude Code picking
   up `.claude/skills/` rests on its documentation and has not been checked live.
-- **The `claude` reviewer** has not been run live: no `claude` CLI was available. Its read-only
-  tool set is carried over from the project detent grew out of.
+- **The `claude` reviewer's read-only** was probed with Claude Code 2.1.316 on Windows and WSL:
+  with the adapter's flags the session has only `Read`, `Grep` and `Glob`, no file appeared in the
+  repository, the run directory or outside them, and `--restricted` blocked reading outside the
+  two. A full review by `claude` has not been run (for a Claude author the family rule excludes it).
 - **The plugin's skill names** are not verified: Claude Code may name them by directory
   (`detent:design-spec`) or by the frontmatter `name` (`detent:detent-design-spec`).
 - **"Reviewed by Gemini 4 Argon"** is the `agy` CLI's claim: it accepts `--model` and refuses an
