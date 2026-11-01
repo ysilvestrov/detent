@@ -173,6 +173,7 @@ describe('constitution', () => {
   test.each([
     ['sizing is the estimate game', "the question that ends your first message is the owner's size (XS–XL), and yours comes only after an approach is picked."],
     ['builder check before cross-review, not a reviewer', 'Before the owner sees a spec: builder check, then `cross-review --spec`. The builder is of your family and is not the reviewer of rule 6;'],
+    ['more than three owner questions: one message before the cross-review', 'More than three such questions means the spec is not ready: ask them in one message before the cross-review.'],
     ['a spike commits nothing', 'A spike commits nothing.'],
     ['specs in monthly folders', 'Specs go to `<specsDir>/<YYYY-MM>/`, never flat.'],
     ['plans in monthly folders', 'save it under `<plansDir>/<YYYY-MM>/`.'],
