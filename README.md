@@ -25,7 +25,7 @@ The process grew out of a real project and rests on four ideas:
   request opens, the author's work is reviewed by an agent running a model from a different family
   (Anthropic, OpenAI or Google). A different CLI on the same model family doesn't count.
 
-## Release 1 (v0.1.0)
+## Release 1 (v0.2.0)
 
 - **A constitution block** for `CLAUDE.md` and `AGENTS.md`: the spec as the single source of
   truth, classification after the probe, the one-way ratchet, claim → evidence, test quality, the
@@ -48,12 +48,12 @@ Release 2 is planned to add AI PR review in GitHub as a reusable Action. Design 
 Release 1 is installed from git only; there is no npm package.
 
 ```
-npm i -D github:ysilvestrov/detent#v0.1.0
+npm i -D github:ysilvestrov/detent#v0.2.0
 npx detent install [--claude] [--agents] [--dry-run] [--superpowers yes|no]
 ```
 
 npm builds `dist/` with the package's `prepare` script when it installs the git dependency.
-One-off, without adding the dependency: `npx github:ysilvestrov/detent#v0.1.0 install`.
+One-off, without adding the dependency: `npx github:ysilvestrov/detent#v0.2.0 install`.
 
 Run it inside a git repository: the project root is `git rev-parse --show-toplevel`. Without a
 target flag both targets are installed.
@@ -272,5 +272,5 @@ What release 1 has and has not proved, from the spec's claim → evidence table 
   be committed into the release tag.
 - **Install from git** was tried with `npm i -D` on Windows and WSL. The lock file records the
   dependency as `git+ssh://git@github.com/…`; a machine without an SSH key for GitHub has not been
-  tried, nor has the one-off `npx github:…` form.
+  tried. The one-off `npx -y github:ysilvestrov/detent#v0.1.0 --version` printed `0.1.0` on both.
 - The `codex` reviewer has not been run on Windows.
