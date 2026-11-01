@@ -229,32 +229,57 @@ describe('classifyRun', () => {
 });
 
 describe('classifyCanary', () => {
-  test('no file after a clean exit: the rule held', () => {
-    expect(classifyCanary(ADAPTERS.agy, clean, false)).toBeNull();
+  // agy 1.4.12, measured live on Windows and WSL (core review).
+  const REFUSAL = 'Permission denied for write_file(/tmp/run/canary). Matches user-configured deny rule.';
+  const refused = { ...clean, stdout: `The write_file call was blocked:\n${REFUSAL}\n` };
+
+  test('no file, a clean exit and the refusal on stdout: the rule held', () => {
+    expect(classifyCanary(ADAPTERS.agy, refused, false)).toBeNull();
   });
-  test('the file exists: the deny rule is ineffective, whatever the exit', () => {
-    expect(classifyCanary(ADAPTERS.agy, { ...clean, exitCode: null, timedOut: true }, true)).toEqual({
-      kind: 'failed', reason: 'deny rule ineffective', timeout: false,
+  test('the refusal on stderr counts as well', () => {
+    expect(classifyCanary(ADAPTERS.agy, { ...clean, stderr: REFUSAL }, false)).toBeNull();
+  });
+  test('the short substring is matched without regard to case: a reworded message still passes', () => {
+    expect(classifyCanary(ADAPTERS.agy, { ...clean, stdout: 'Blocked by a Deny Rule of the session.' }, false)).toBeNull();
+  });
+  test('no file and a clean exit but no refusal: write_file may never have been called, the rule is not proved', () => {
+    expect(classifyCanary(ADAPTERS.agy, { ...clean, stdout: 'I will not create files.' }, false)).toEqual({
+      kind: 'failed', reason: 'canary failed, review not run: no "deny rule" in its output', timeout: false,
+    });
+  });
+  test('an empty canary output proves nothing', () => {
+    expect(classifyCanary(ADAPTERS.agy, clean, false)).toEqual({
+      kind: 'failed', reason: 'canary failed, review not run: no "deny rule" in its output', timeout: false,
+    });
+  });
+  test('"deny" and "rule" apart are not the refusal', () => {
+    expect(classifyCanary(ADAPTERS.agy, { ...clean, stdout: 'deny\nrule' }, false)).toEqual({
+      kind: 'failed', reason: 'canary failed, review not run: no "deny rule" in its output', timeout: false,
+    });
+  });
+  test('the file exists: the deny rule is ineffective, whatever the exit and the output', () => {
+    expect(classifyCanary(ADAPTERS.agy, { ...refused, exitCode: null, timedOut: true }, true)).toEqual({
+      kind: 'failed', reason: 'canary failed, review not run: deny rule ineffective (canary file was written)', timeout: false,
     });
   });
   test('a canary timeout is a timeout', () => {
     expect(classifyCanary(ADAPTERS.agy, { ...clean, exitCode: null, timedOut: true }, false)).toEqual({
-      kind: 'failed', reason: 'canary: timeout after 15 min', timeout: true,
+      kind: 'failed', reason: 'canary failed, review not run: timeout after 15 min', timeout: true,
     });
   });
   test('a canary spawn error proves nothing', () => {
     expect(classifyCanary(ADAPTERS.agy, { ...clean, exitCode: null, spawnError: 'ENOENT' }, false)).toEqual({
-      kind: 'failed', reason: 'canary did not run to completion: ENOENT', timeout: false,
+      kind: 'failed', reason: 'canary failed, review not run: did not run to completion: ENOENT', timeout: false,
     });
   });
-  test('a canary non-zero exit carries agy\'s error line', () => {
-    expect(classifyCanary(ADAPTERS.agy, { ...clean, exitCode: 1, stderr: 'error: not signed in\nhelp text\n' }, false)).toEqual({
-      kind: 'failed', reason: 'canary: not signed in', timeout: false,
+  test('a canary non-zero exit carries agy\'s error line, even with the refusal in the output', () => {
+    expect(classifyCanary(ADAPTERS.agy, { ...refused, exitCode: 1, stderr: 'error: not signed in\nhelp text\n' }, false)).toEqual({
+      kind: 'failed', reason: 'canary failed, review not run: not signed in', timeout: false,
     });
   });
   test('a canary non-zero exit without an error line names the code', () => {
     expect(classifyCanary(ADAPTERS.agy, { ...clean, exitCode: 2 }, false)).toEqual({
-      kind: 'failed', reason: 'canary exited with code 2', timeout: false,
+      kind: 'failed', reason: 'canary failed, review not run: exited with code 2', timeout: false,
     });
   });
 });

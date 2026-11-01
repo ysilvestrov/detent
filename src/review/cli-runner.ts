@@ -118,19 +118,24 @@ export function classifyRun(
 }
 
 // The canary proves the deny rule: a file means the rule does nothing in this CLI version, and a
-// canary that did not finish cleanly proves nothing either. A canary timeout is a timeout.
+// canary that did not finish cleanly proves nothing either. No file is not enough on its own: a
+// model that never called write_file leaves none too, so the refusal itself must be in the output
+// (owner's amendment). The short substring survives small rewordings of agy's message. Every
+// canary failure says so, so the marker shows agy never reviewed. A canary timeout is a timeout.
+const CANARY_FAILED = 'canary failed, review not run: ';
+const DENY_RULE = /deny rule/i;
+
 export function classifyCanary(
   adapter: Pick<ReviewerAdapter, 'errorLine'>,
   r: ProcessOutcome,
   fileExists: boolean,
 ): Extract<RunVerdict, { kind: 'failed' }> | null {
-  if (fileExists) return { kind: 'failed', reason: 'deny rule ineffective', timeout: false };
-  if (r.timedOut) return { kind: 'failed', reason: `canary: ${TIMEOUT_REASON}`, timeout: true };
-  if (r.spawnError !== undefined) return { kind: 'failed', reason: `canary did not run to completion: ${r.spawnError}`, timeout: false };
-  if (r.exitCode !== 0) {
-    const tail = errorTail(adapter, r.stdout, r.stderr);
-    return { kind: 'failed', reason: tail === null ? `canary exited with code ${r.exitCode}` : `canary: ${tail}`, timeout: false };
-  }
+  const failed = (detail: string, timeout = false) => ({ kind: 'failed' as const, reason: CANARY_FAILED + detail, timeout });
+  if (fileExists) return failed('deny rule ineffective (canary file was written)');
+  if (r.timedOut) return failed(TIMEOUT_REASON, true);
+  if (r.spawnError !== undefined) return failed(`did not run to completion: ${r.spawnError}`);
+  if (r.exitCode !== 0) return failed(errorTail(adapter, r.stdout, r.stderr) ?? `exited with code ${r.exitCode}`);
+  if (!DENY_RULE.test(r.stdout) && !DENY_RULE.test(r.stderr)) return failed('no "deny rule" in its output');
   return null;
 }
 

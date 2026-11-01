@@ -94,7 +94,17 @@ describe('crossReview: a review that runs', () => {
   test('the agy canary wrote its file: failed, and the review never ran', () => {
     const s = setup(['agy']);
     expect(s.run(['--author', 'claude', '--reviewer', 'agy', '--base', 'main'], { FAKE_AGY: 'ok:1', FAKE_AGY_CANARY: 'writes' })).toBe(5);
-    expect(s.out).toEqual(['PR marker: Cross-review: failed (author: claude; agy: deny rule ineffective)']);
+    expect(s.out).toEqual(['PR marker: Cross-review: failed (author: claude; agy: canary failed, review not run: deny rule ineffective (canary file was written))']);
+    expect(s.calls('agy').map((c) => c.kind)).toEqual(['canary']);
+  }, E2E_TIMEOUT);
+
+  test('the agy canary neither wrote nor reported a refusal: the review never ran, and the fallback says why', () => {
+    const s = setup(['codex', 'agy']);
+    commitFile(s.repo, s.env, 'detent.json', '{ "reviewers": ["agy", "codex"] }\n', 'chore: agy first');
+    expect(s.run(['--author', 'claude', '--base', 'main'], { FAKE_CODEX: 'ok:2', FAKE_AGY: 'ok:1', FAKE_AGY_CANARY: 'silent' })).toBe(0);
+    expect(s.out).toEqual([
+      `PR marker: Cross-review: codex/gpt-6.1-sol @ ${s.sha7()} (author: claude) — 2 findings: <f> fixed, <r> rejected (fallback: agy — canary failed, review not run: no "deny rule" in its output)`,
+    ]);
     expect(s.calls('agy').map((c) => c.kind)).toEqual(['canary']);
   }, E2E_TIMEOUT);
 

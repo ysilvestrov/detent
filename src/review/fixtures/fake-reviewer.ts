@@ -10,6 +10,7 @@
 //   FAKE_<ID>=jetski    exit 0, empty stdout, agy's headless permission refusal on stderr
 //   FAKE_<ID>=sleep     never finishes (for the timeout)
 //   FAKE_AGY_CANARY=writes   the agy canary creates the file it is asked to (deny rule ineffective)
+//   FAKE_AGY_CANARY=silent   the agy canary neither writes nor reports a refusal (rule not proved)
 // Every call is appended to <logDir>/<id>.jsonl: kind, cwd, CROSS_REVIEW_ACTIVE, stdin, first prompt line.
 import { chmodSync, existsSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -41,6 +42,7 @@ fs.appendFileSync(path.join(process.env.FAKE_LOG_DIR, ID + '.jsonl'), JSON.strin
 
 if (canary) {
   if (process.env.FAKE_AGY_CANARY === 'writes') fs.writeFileSync(canary[1], 'canary');
+  else if (process.env.FAKE_AGY_CANARY === 'silent') process.stdout.write('I will not create files.\n');
   else process.stdout.write('Permission denied for write_file. Matches user-configured deny rule.\n');
   process.exit(0);
 }
