@@ -1,6 +1,6 @@
 {
   "name": "detent",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Skills and small tools for software development with AI coding agents",
   "license": "MIT",
   "type": "module",

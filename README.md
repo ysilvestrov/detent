@@ -25,12 +25,13 @@ The process grew out of a real project and rests on four ideas:
   request opens, the author's work is reviewed by an agent running a model from a different family
   (Anthropic, OpenAI or Google). A different CLI on the same model family doesn't count.
 
-## Release 1 (v0.2.0)
+## Release 1 (v0.2.1)
 
 - **A constitution block** for `CLAUDE.md` and `AGENTS.md`: the spec as the single source of
   truth, classification after the probe, the one-way ratchet, claim → evidence, test quality, the
-  reviewer is not the author, Superpowers overrides (checked against Superpowers 7.0.1), the
-  deletion rule.
+  reviewer is not the author, Superpowers overrides, the deletion rule. The overrides were
+  checked against Superpowers 7.0.1: brainstorming, writing-plans, subagent-driven-development,
+  executing-plans, finishing-a-development-branch, using-git-worktrees, requesting-code-review.
 - **Four skills**: `detent-design-spec` (a spec with an owner section, the estimation game, the
   claim → evidence table; the format is in `spec-format.md` next to it), `detent-pr-slicing`,
   `detent-cross-review`, `detent-dev-cycle` (only when invoked explicitly, for projects without
@@ -48,12 +49,12 @@ Release 2 is planned to add AI PR review in GitHub as a reusable Action. Design 
 Release 1 is installed from git only; there is no npm package.
 
 ```
-npm i -D github:ysilvestrov/detent#v0.2.0
+npm i -D github:ysilvestrov/detent#v0.2.1
 npx detent install [--claude] [--agents] [--dry-run] [--superpowers yes|no]
 ```
 
 npm builds `dist/` with the package's `prepare` script when it installs the git dependency.
-One-off, without adding the dependency: `npx github:ysilvestrov/detent#v0.2.0 install`.
+One-off, without adding the dependency: `npx github:ysilvestrov/detent#v0.2.1 install`.
 
 Run it inside a git repository: the project root is `git rev-parse --show-toplevel`. Without a
 target flag both targets are installed.
