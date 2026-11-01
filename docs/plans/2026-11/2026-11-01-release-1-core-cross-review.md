@@ -282,7 +282,7 @@ describe('no project-specific text in the core prompts', () => {
 
 Файли: `src/review/cli-runner.ts`, `src/commands/cross-review.ts`, `src/cli.ts`, тести
 `src/review/cli-runner.test.ts`, `src/commands/cross-review.test.ts`, фікстура
-`test/fixtures/fake-reviewer.ts`.
+`src/review/fixtures/fake-reviewer.ts` (під `src/`, бо `rootDir` — `src`; `tsconfig.build.json` її виключає).
 
 - `cli-runner.ts` — єдине місце зі `spawnSync`, worktree і таймаутом:
   - `findExecutable(cmd, { env, platform, isFile })` — PATH × PATHEXT на `win32`
