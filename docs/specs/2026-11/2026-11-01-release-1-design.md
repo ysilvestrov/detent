@@ -85,8 +85,8 @@ Spec-review: codex/gpt-6.1-sol @ ffbe2a2 — 7 findings: 7 fixed, 0 rejected
    воно блокує `write_file` і `edit_file`. Правила без `(*)` або з іншими іменами мовчки
    ігноруються. `[проба]` (П-А3…П-А8, П-А-S)
 8. Імена скілів у локальній установці — `detent-design-spec` (через дефіс), бо і Claude Code, і
-   Codex дозволяють у `name` лише малі літери, цифри й дефіс. `detent:design-spec` (через
-   двокрапку) — це простір імен плагіна Claude, і він буває лише в установці плагіном.
+   Codex дозволяють у `name` лише малі літери, цифри й дефіс. Двокрапка — це простір імен
+   плагіна Claude, і він буває лише в установці плагіном: `/detent:detent-design-spec` (П-И).
    `[виведення]` з документації
 9. Superpowers не правиться: override оголошуються в конституції проєкту. `[вимога власника]`
    Але override warsaw застаріли: у Superpowers 7.0.1 `brainstorming` уже не має гілки
@@ -587,8 +587,8 @@ npx detent install [--claude] [--agents] [--dry-run] [--superpowers yes|no]
 
 Плагін Claude: `.claude-plugin/plugin.json` посилається на `skills/`, `marketplace.json`
 дозволяє `/plugin marketplace add ysilvestrov/detent`. У плагіні скіли називаються
-`detent:<name>`. Плагін не кладе конституцію: її ставить `npx detent install --claude`.
-Одночасна установка плагіном і копіюванням дасть дублікати (`detent:design-spec` і
+`/detent:detent-<name>` (ім'я плагіна + `name` з frontmatter, П-И). Плагін не кладе конституцію: її ставить `npx detent install --claude`.
+Одночасна установка плагіном і копіюванням дасть дублікати (`detent:detent-design-spec` і
 `detent-design-spec`). Інсталятор попереджає, якщо бачить плагін увімкненим у
 `.claude/settings.json`.
 
@@ -602,7 +602,7 @@ npx detent install [--claude] [--agents] [--dry-run] [--superpowers yes|no]
 | «Рецензент ≠ автор» | маркер | `--author` — заява того, хто викликає; інструмент перевіряє лише, що родини різні | заява, не доказ; маркер її так і називає (`author: claude`) |
 | «n findings: f fixed, r rejected» | маркер | `n` — з рядка `CROSS-REVIEW-RESULT`; `f` і `r` — самозвіт автора | самозвіт, нічого не вмикає; таблиця `## Рев'ю спеки` — слід |
 | «Скіл установлено й актуальний» | `.detent/manifest.json` | sha256 записаного файлу на момент запису | доводить лише момент запису; перевірка при кожній установці |
-| «Скіл підхоплюється агентом» | README, установка | Codex — так, П-В2; `agy` — так, П-А1/П-А2 (WSL і Windows); Claude Code — `.claude/skills/` за документацією, тут не перевірено | README заявляє всі три; Claude Code — найслабший рядок |
+| «Скіл підхоплюється агентом» | README, установка | Codex — так, П-В2; `agy` — так, П-А1/П-А2 (WSL і Windows); Claude Code — `.claude/skills/` і плагін, П-И (Windows) | README заявляє всі три |
 | «Фактично: <розмір>» | спека | кількість PR і задач у планах — лічильник | лічильник, але він і є предметом заявки |
 
 ## Проби
@@ -881,6 +881,25 @@ exists? written.txt / run/written-run.txt / written-outside.txt → false, false
 Висновок: read-only `claude`-рецензента тримає набір інструментів, як і заявлено. `--restricted`
 ще й обмежує читання репо й `--add-dir`. Повного рев'ю силами `claude` не запускали: для
 Claude-автора правило родин його виключає.
+
+### П-И. Claude Code підхоплює скіли: копії й плагін — **проведена** (після PR 3)
+
+Claude Code 2.1.316, Windows, `main` @ `c7055b9`.
+
+Копії: чистий git-репо, `node dist/cli.js install --claude --superpowers no`, потім
+`claude -p "List verbatim every skill name available to you…"` із закритим stdin. У списку —
+`detent-cross-review`, `detent-design-spec`, `detent-dev-cycle`, `detent-pr-slicing`.
+
+Плагін: власник у Claude Code в `C:Projectsdetent` виконав `/plugin marketplace add
+ysilvestrov/detent` і `/plugin install detent@detent` («Installed detent. Plugin is now active»;
+`enabledPlugins` з'явився в `.claude/settings.json` проєкту). Автодоповнення `/dete` показує
+`/detent:detent-dev-cycle`, `/detent:detent-pr-slicing`, `/detent:detent-design-spec` з описами з
+frontmatter. Список скілів, який бачить модель, дає `detent:<тека>` і в дужках
+`detent:detent-<name>` (наприклад, `detent:cross-review (detent:detent-cross-review)`).
+
+Висновок: обидва шляхи працюють. Команда плагіна — `/detent:detent-<name>`: ім'я плагіна + `name`
+з frontmatter, а не ім'я теки, як припускала спека. Разом із копіями кожен скіл є двічі, як і
+попереджає інсталятор. WSL і машину без SSH-ключа тут не перевіряли.
 
 ## Ризики й відкриті питання для плану
 

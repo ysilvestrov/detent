@@ -112,9 +112,12 @@ directories) being one file on disk through a link, in which case install one ta
 /plugin install detent@detent
 ```
 
+In Claude Code the plugin's skills are called `/detent:detent-<name>`, for example
+`/detent:detent-design-spec`: the plugin name, then the skill's frontmatter `name`.
+
 The plugin gives Claude Code the skills only. It does not install the constitution block: run
 `npx detent install --claude` for that. The plugin and the copied skills together give each skill
-twice (the plugin's namespaced `detent:…` one and `detent-<name>` from `.claude/skills/`); install
+twice (the plugin's `/detent:detent-<name>` and `detent-<name>` from `.claude/skills/`); install
 warns when it sees the detent plugin enabled in the project's `.claude/settings.json`. Nothing
 reaches Codex or Antigravity through the plugin.
 
@@ -255,14 +258,13 @@ inline command, never in the background.
 What release 1 has and has not proved, from the spec's claim → evidence table and probes:
 
 - **Skill pickup**: Codex 0.166 and `agy` 1.4.12 see all four `detent-*` skills in
-  `.agents/skills/` and each picks its own `--author` value (probed in WSL). Claude Code picking
-  up `.claude/skills/` rests on its documentation and has not been checked live.
+  `.agents/skills/` and each picks its own `--author` value (probed in WSL). Claude Code 2.1.316
+  lists all four from `.claude/skills/` and, through the plugin, as `/detent:detent-<name>`
+  (probed on Windows).
 - **The `claude` reviewer's read-only** was probed with Claude Code 2.1.316 on Windows and WSL:
   with the adapter's flags the session has only `Read`, `Grep` and `Glob`, no file appeared in the
   repository, the run directory or outside them, and `--restricted` blocked reading outside the
   two. A full review by `claude` has not been run (for a Claude author the family rule excludes it).
-- **The plugin's skill names** are not verified: Claude Code may name them by directory
-  (`detent:design-spec`) or by the frontmatter `name` (`detent:detent-design-spec`).
 - **"Reviewed by Gemini 4 Argon"** is the `agy` CLI's claim: it accepts `--model` and refuses an
   unknown model, but its response does not name the model that answered.
 - **The author** in the marker is the caller's claim, and `<f> fixed, <r> rejected` is the
