@@ -1,7 +1,7 @@
 # Override-и для Superpowers 7.0.1: оцінка, builder check і решта колізій процесу
 
 Дата: 2026-11-01
-Статус: чекає на затвердження
+Статус: затверджено 2026-11-01
 Spec-review: codex/gpt-6.1-sol @ 7a2ae9d (author: claude) — 4 findings: 4 fixed, 0 rejected
 
 ## Для власника
