@@ -3,13 +3,15 @@
 Дата: 2026-11-01
 Статус: чекає на затвердження
 Spec-review: codex/gpt-6.1-sol @ ffbe2a2 — 7 findings: 7 fixed, 0 rejected
+Поправка після рев'ю (2026-11-01): власник установив `agy`, П-А і П-Б проведено. Засновки 5–7,
+статус `agy` і його адаптер переписано за результатами, рецензент цієї частини не бачив.
 
 ## Для власника
 
 **Мета.** Процес, який виріс у warsaw-beer-bot (спека як контракт, проба перед класифікацією,
 храповик, «заявка → доказ», рецензент ≠ автор), стає набором, який ставиться в будь-який
-проєкт однією командою й працює однаково в Claude Code і Codex, а в Antigravity — після
-пілотних проб. Нічого пивного в ядро не йде.
+проєкт однією командою й працює однаково в Claude Code, Codex і Antigravity. Нічого пивного в
+ядро не йде.
 
 **Що зміниться для тебе.**
 - Для нового проєкту: одна команда `npx detent install` кладе скіли в `.claude/skills/` і
@@ -18,14 +20,16 @@ Spec-review: codex/gpt-6.1-sol @ ffbe2a2 — 7 findings: 7 fixed, 0 rejected
 - Cross-review запускається як `npx detent cross-review` замість `npm run cross-review`. Якщо
   ти не скажеш, хто автор, інструмент відмовиться працювати: вгадати автора з оточення
   неможливо (виміряно у warsaw, §Засновки).
-- **Antigravity у реліз 1 входить лише як «експериментальний» рецензент.** Жодну з двох проб
-  щодо `agy` не вдалося провести: CLI не встановлено ні у Windows, ні у WSL (є тільки десктопний
-  Antigravity 44.5.1, без `agy`). Ставити його я не став без тебе: установка — це запуск
-  віддаленого скрипта. Поки проби не пройдуть, `agy` за замовчуванням не обирається.
-  **Межа доступу:** у `agy` немає режиму «лише читання». Якщо ти явно запустиш
-  `--reviewer agy`, рецензент працюватиме з правами твого користувача: знімок-worktree береже
-  лише твій checkout від випадкових правок, а не решту файлів. Пом'якшення — `--sandbox` і
-  відсутність автоматичних дозволів, але жодне з них не перевірене пробою.
+- **Antigravity — повноправний третій рецензент (Gemini 4 Argon), але read-only у нього
+  тримається на правилі, а не на пісочниці.** Проби на `agy` 1.4.12 (WSL і Windows) показали:
+  скіли з `.agents/skills/` підхоплюються, Argon на твоєму акаунті доступна. Але **в `agy` -p
+  файловий інструмент пише куди завгодно** з правами твого користувача, поза репо теж.
+  Документація обіцяла протилежне, і ні `--sandbox`, ні `--mode plan` цього не зупиняють
+  (П-А3…А8). Працює лише сесійне deny-правило `--settings` з `write_file(*)`: воно
+  блокує і запис, і правку, а твій `settings.json` не змінює. Пастка в тому, що правило з
+  неправильним синтаксисом **мовчки ігнорується**. Тому кожен запуск `agy` починається з
+  канарки: спроби записати файл з тим самим правилом. Якщо файл з'явився, рев'ю не
+  запускається (exit 5). MCP-сервери, які ти підключиш до `agy`, цим правилом не покриті.
 - **Конституція велить агентові відкривати PR без питання** (override
   `finishing-a-development-branch`, як у warsaw). Це зовнішня дія без підтвердження в кожному
   проєкті, куди ставиться detent. Мерджить і далі лише людина.
@@ -51,18 +55,19 @@ Spec-review: codex/gpt-6.1-sol @ ffbe2a2 — 7 findings: 7 fixed, 0 rejected
    після нього. Тому раннер завжди закриває stdin. `[проба]` (П-В0)
 4. Codex 0.166 у режимі `exec` бачить скіл із `.agents/skills/` навіть у недовіреному
    репозиторії: `detent-probe` стоїть у його списку скілів поруч із вбудованими. `[проба]` (П-В2)
-5. `agy -p` підхоплює скіли з `.agents/skills/` у headless-режимі — **не перевірено**. Документація
-   третіх сторін каже «так», але офіційної немає, а живої проби не було. Не заявка. `[проба не
-   проведена]` (П-А)
-6. Gemini 4 Argon доступна тобі в Antigravity CLI — **не перевірено**. За публічними звітами вона
-   залежить від тарифу (Ultra або Pro, джерела суперечать одне одному) і від версії CLI (≥ 1.4.3,
-   на 1.3.x модель «не розпізнається»). Запасна дорога — `agy` з `modelProvider: gemini` і
-   `GEMINI_API_KEY`, теж не перевірена. Не заявка. `[проба не проведена]` (П-Б)
-7. У `agy` немає режиму read-only, лише `--sandbox` (обмеження терміналу) і запит дозволу на
-   запис у headless. Тому read-only для нього **не гарантований**. Знімок-worktree лише
-   відводить випадкові правки від checkout автора, а від запису деінде береже тільки
-   `--sandbox` і відсутність `--dangerously-skip-permissions`. `[виведення]` з документації, не
-   з проби.
+5. `agy -p` 1.4.12 підхоплює і застосовує скіли з `.agents/skills/` у headless-режимі, у WSL і
+   у Windows однаково. `[проба]` (П-А1, П-А2, П-А-Win)
+6. Gemini 4 Argon доступна тобі в `agy` через акаунт, без API-ключа (`settings.json` порожній).
+   `agy models` дає `gemini-4-argon-{low,medium,high}`; голе `--model gemini-4-argon` теж
+   приймається. Невідома модель — exit 1 з `error: invalid model selection…`, а не тиха підміна,
+   як у 1.3.x. Модель, яка реально відповідала, у JSON-відповіді не названо: доказ — лише
+   прийнятий `--model` і самоназва. Запасна дорога через `GEMINI_API_KEY` не знадобилась і не
+   перевірялась. `[проба]` (П-Б)
+7. `agy -p` пише файли без жодного дозволу: `write_file` створює файл поза репо і без прапорців,
+   і з `--sandbox`, і з `--mode plan`. Shell-команди в headless відхиляються, а файловий
+   інструмент — ні. Read-only дає лише `--settings '{"permissions":{"deny":["write_file(*)"]}}'`:
+   воно блокує `write_file` і `edit_file`. Правила без `(*)` або з іншими іменами мовчки
+   ігноруються. `[проба]` (П-А3…П-А8, П-А-S)
 8. Імена скілів у локальній установці — `detent-design-spec` (через дефіс), бо і Claude Code, і
    Codex дозволяють у `name` лише малі літери, цифри й дефіс. `detent:design-spec` (через
    двокрапку) — це простір імен плагіна Claude, і він буває лише в установці плагіном.
@@ -87,8 +92,9 @@ Spec-review: codex/gpt-6.1-sol @ ffbe2a2 — 7 findings: 7 fixed, 0 rejected
    симлінки — на Windows вони потребують режиму розробника або адміна, а git їх зберігає погано.
 3. **Рецензент описується адаптером: як запустити, звідки брати звіт, як розпізнати збій, чим
    гарантується read-only і яка родина моделей.** Правило «рецензент ≠ автор» порівнює
-   **родину моделі**, а не назву CLI: Antigravity вміє запускати й Claude, і такий рецензент
-   для спеки, написаної Claude, — це той самий автор. Відкинуто: порівнювати назви CLI.
+   **родину моделі**, а не назву CLI: `agy models` на твоєму акаунті пропонує Claude Opus 5.5
+   і Sonnet 5.5 (П-Б), і такий рецензент для спеки, написаної Claude, — це той самий автор.
+   Відкинуто: порівнювати назви CLI.
 4. **Транспорт рецензента (CLI-процес) відділено від протоколу (промпт, рядок результату,
    маркер).** Реліз 2 додасть HTTP-транспорт до того ж протоколу. Відкинуто: узагальнювати під
    API вже зараз, бо реліз 2 ще не спроєктовано.
@@ -109,8 +115,11 @@ Spec-review: codex/gpt-6.1-sol @ ffbe2a2 — 7 findings: 7 fixed, 0 rejected
   лише після `npx detent install`. Між цими моментами проєкт живе на старому тексті.
 - Конституція стає спільною для всіх проєктів, тож уточнення під один проєкт мусять іти поза
   маркерами, а не правкою блоку. Інакше наступне оновлення спиниться на зміненому файлі.
-- Antigravity у релізі 1 непідтверджений. Якщо проби провалиться, адаптер `agy` лишиться
-  експериментальним, а «рецензент ≠ автор» триматиметься на двох родинах.
+- Read-only `agy` тримається на правилі в наших аргументах, яке чужий апдейт CLI може тихо
+  зламати: перейменувати інструмент чи синтаксис. Канарка ловить це до рев'ю, але коштує
+  зайвий виклик моделі (кілька секунд, ~7k вхідних токенів) на кожен запуск.
+- MCP-сервери, підключені до `agy`, правилом `write_file(*)` не покриті: їхні інструменти
+  рецензент може викликати.
 - Скіли англійською (якщо ти це затвердиш) читатимуться трохи інакше, ніж звичні українські
   правила warsaw. Ризик — розбіжність формулювань між detent і warsaw, поки той не мігрує.
 - Рецензент Codex теж бачить усі detent-скіли проєкту (П-В2). Промпт рев'ю самодостатній, але
@@ -120,9 +129,9 @@ Spec-review: codex/gpt-6.1-sol @ ffbe2a2 — 7 findings: 7 fixed, 0 rejected
 **Оцінка.**
 - Власник: **M** для Claude + Codex, **L** з Antigravity.
 - Автор: **L**, 3 PR. Розклад: cross-review CLI (порт, адаптери, тести) ~35%; скіли,
-  конституція й `dev-cycle` ~35%; інсталятор і плагін ~15%; Antigravity-адаптер і його проби
-  ~15%. Antigravity подешевшав проти попередніх 20%, бо адаптер — це один рядок таблиці
-  рецензентів, а вся ціна сидить у пробах, які блокує відсутній CLI.
+  конституція й `dev-cycle` ~35%; інсталятор і плагін ~15%; Antigravity-адаптер ~15%.
+  Antigravity подешевшав проти попередніх 20%, бо проби вже зроблено. Решта — канарка,
+  розбір першого рядка помилки й тести на них.
 - Дешевший варіант — **M**: лише Claude + Codex, без плагіна (тільки `npx detent install`), без
   `dev-cycle`. Втрачається третя родина моделей і робота без Superpowers.
 - Розбіжності на ≥ 2 розміри немає: з Antigravity обидві оцінки L; без нього я теж даю M.
@@ -130,8 +139,8 @@ Spec-review: codex/gpt-6.1-sol @ ffbe2a2 — 7 findings: 7 fixed, 0 rejected
 **Питання до власника.**
 1. Мова: тіло скілів і конституції — англійською, мова артефактів (спеки, плани, маркери) —
    з конфігу проєкту (`"language": "uk"`). Затверджуєш?
-2. Antigravity: поставити `agy` (≥ 1.4.3) зараз і провести П-А і П-Б **до плану**, чи
-   плануємо Claude + Codex, а адаптер `agy` — останнім PR після проб?
+2. `agy` як `stable`-рецензент, із read-only через deny-правило й канарку на кожен запуск, —
+   прийнятно? Альтернатива — `experimental`: лише за явним `--reviewer agy`.
 3. Публікація: npm-пакет `detent` (`npx detent …`) чи лише установка з git
    (`npx github:ysilvestrov/detent …`) у релізі 1?
 
@@ -388,12 +397,13 @@ interface ReviewerAdapter {
   id: 'claude' | 'codex' | 'agy';
   family: 'anthropic' | 'openai' | 'google';   // для правила «рецензент ≠ автор»
   status: 'stable' | 'experimental';            // experimental не обирається автоматично
-  readOnlyBy: 'sandbox' | 'toolset' | 'isolation';
+  readOnlyBy: 'sandbox' | 'toolset' | 'deny-rule';
   acceptsModel(model: string): boolean;          // agy: лише gemini-*
   command(p: { model?: string; prompt: string; reportPath: string; runDir: string }): {
     cmd: string; args: string[]; report: 'stdout' | 'file';
   };
-  errorLine: { stream: 'stdout' | 'stderr'; prefix: string };
+  canary?(p: { runDir: string; model: string }): { cmd: string; args: string[]; mustNotExist: string };
+  errorLine: { stream: 'stdout' | 'stderr'; prefix: string; which: 'first' | 'last' };
 }
 ```
 
@@ -401,18 +411,28 @@ interface ReviewerAdapter {
 |---|---|---|---|
 | `codex` | `codex exec -s read-only --ephemeral -o <report> [-m <model>] <prompt>` | пісочниця Codex (П-В1) | stable |
 | `claude` | `claude -p --restricted --strict-mcp-config --tools Read,Grep,Glob --add-dir <runDir> [--model <m>] -- <prompt>` | набір інструментів без запису (warsaw P2) | stable |
-| `agy` | `agy -p <prompt> --model <m> --sandbox --output-format text --print-timeout 15m` | не гарантований: `--sandbox` і без `--dangerously-skip-permissions`; знімок лише відводить правки від checkout автора | experimental |
+| `agy` | `agy --settings '{"permissions":{"deny":["write_file(*)"]}}' --sandbox --model <m> --output-format text -p <prompt>` | deny-правило сесії (П-А-S) + канарка перед кожним запуском | stable (питання 2) |
 
-Рядки помилок: `claude` — stdout, `API Error:`; `codex` — stderr, `ERROR:` (П-В3 повторно
-підтвердив форму: `ERROR: The 'no-such-model-xyz' model is not supported…`, exit 1). Для `agy`
-документація каже лише «non-zero exit, reason on stderr»; префікс невідомий, тож до проби
-`agy` класифікується за кодом виходу, без розбору рядка.
+Рядки помилок: `claude` — stdout, `API Error:`, останній рядок; `codex` — stderr, `ERROR:`,
+останній рядок (П-В3: `ERROR: The 'no-such-model-xyz' model is not supported…`, exit 1);
+`agy` — stderr, `error:`, **перший** рядок, бо після нього `agy` друкує список доступних
+моделей (П-Б2). Тому `errorLine` дістав поле `which`.
 
-Чому `agy` — `experimental`, а не просто ще один рядок: (1) його read-only не гарантується
-інструментом, лише ізоляцією, тож рецензент **може** писати у знімок і, якщо пісочниці немає,
-поза ним; (2) за документацією `--print-timeout` за замовчуванням 5 хв, тож без явного прапорця
-рев'ю обривалося б утричі раніше за власний таймаут раннера; (3) жоден із його прапорців не
-перевірено живою пробою. Перехід у `stable` — окремою поправкою до спеки після П-А і П-Б.
+Що з'ясували проби про `agy` і що з цього випливає для адаптера:
+- `-p` бере **наступний аргумент** як промпт: `agy -p --sandbox '…'` завершується exit 2
+  (`-p took "--sandbox" as its prompt`). Усі прапорці стоять до `-p`, промпт — одразу після
+  нього (П-А3).
+- `--print-timeout` за замовчуванням `0s`, тобто без ліміту (`agy --help`), а не 5 хв, як писали
+  треті сторони. Прапорець не потрібен: ліміт тримає таймаут раннера (15 хв).
+- Відмова в дозволі на shell у headless дає **exit 0** і порожній stdout, а причину пише в stderr
+  (`jetski: no output produced — a tool required the "command" permission…`). Раннер розпізнає
+  це як збій лише тому, що немає рядка `CROSS-REVIEW-RESULT`. Тест мусить це закріпити.
+- **Канарка.** Перед рев'ю раннер запускає `agy` з тими ж `--settings` і `--model` і промптом
+  «create `<runDir>/canary` with write_file». Якщо файл з'явився, правило не діє в цій версії
+  CLI: exit 5, `failed (agy deny rule ineffective)`, рев'ю не запускається. Канарка без файла,
+  але з exit ≠ 0 — теж збій: правило не доведено.
+- `--mode plan` не годиться: він теж пише поза репо (П-А8), а ще кладе артефакт плану в
+  `~/.gemini/antigravity-cli/brain/` (П-А5).
 
 ### Вибір рецензента
 
@@ -420,7 +440,8 @@ interface ReviewerAdapter {
    конфігу, інакше дефолт CLI. Явна модель з будь-якого джерела мусить пройти `acceptsModel`,
    інакше exit 2. Тому `models.agy: "claude-…"` у конфігу відкидається так само, як
    `--model claude-…`. Для `agy` без явної моделі exit 2: дефолт CLI невідомий, і родину
-   неможливо довести.
+   неможливо довести. `acceptsModel` для `agy`: `gemini-4-argon` і `gemini-4-argon-{low,medium,high}`
+   (П-Б), загалом — `gemini-*`.
 2. Якщо задано `--reviewer`: його адаптер мусить мати `family`, відмінну від родини автора,
    інакше exit 2 з поясненням.
 3. Якщо ні: перший у `reviewers` з конфігу, у якого `family` ≠ родина автора, `status` =
@@ -477,11 +498,12 @@ npx detent install [--claude] [--agents] [--dry-run]
 | Що detent записує як факт | Де | Що це доводить | Сила |
 |---|---|---|---|
 | «Рев'ю описує саме `<sha>`» | маркер `Cross-review:`/`Spec-review:` | рецензент працював у знімку-worktree цього SHA, створеному до запуску | за конструкцією |
-| «Рецензент не міг змінити код» | маркер | `codex`: пісочниця, П-В1; `claude`: набір інструментів, warsaw P2 (тут не повторювалось — `claude` CLI немає в цьому оточенні); `agy`: лише ізоляція | для `agy` — слабкий, тому `experimental` |
+| «Рецензент не міг змінити код» | маркер | `codex`: пісочниця, П-В1; `claude`: набір інструментів, warsaw P2 (тут не повторювалось — `claude` CLI немає в цьому оточенні); `agy`: deny-правило, перевірене канаркою цього ж запуску | `agy` — доведено для `write_file`/`edit_file`; MCP-інструменти не покриті |
+| «Рецензував Gemini 4 Argon» | маркер `agy/gemini-4-argon` | `agy` прийняв `--model` (невідома модель — exit 1, П-Б2); у JSON-відповіді назви моделі немає | заява CLI, не доказ; підміни на 1.4.12 не бачили |
 | «Рецензент ≠ автор» | маркер | `--author` — заява того, хто викликає; інструмент перевіряє лише, що родини різні | заява, не доказ; маркер її так і називає (`author: claude`) |
 | «n findings: f fixed, r rejected» | маркер | `n` — з рядка `CROSS-REVIEW-RESULT`; `f` і `r` — самозвіт автора | самозвіт, нічого не вмикає; таблиця `## Рев'ю спеки` — слід |
 | «Скіл установлено й актуальний» | `.detent/manifest.json` | sha256 записаного файлу на момент запису | доводить лише момент запису; перевірка при кожній установці |
-| «Скіл підхоплюється агентом» | README, установка | Codex — так, П-В2; Claude Code — `.claude/skills/` за документацією, тут не перевірено; `agy` — не перевірено (П-А) | README заявляє лише Codex і Claude Code; `agy` — після П-А |
+| «Скіл підхоплюється агентом» | README, установка | Codex — так, П-В2; `agy` — так, П-А1/П-А2 (WSL і Windows); Claude Code — `.claude/skills/` за документацією, тут не перевірено | README заявляє всі три; Claude Code — найслабший рядок |
 | «Фактично: <розмір>» | спека | кількість PR і задач у планах — лічильник | лічильник, але він і є предметом заявки |
 
 ## Проби
@@ -500,45 +522,101 @@ WSL:            codex: ~/.nvm/versions/node/v24.22.2/bin/codex, codex-cli 0.166.
                 claude: command not found; ~/.local/bin без claude/agy
 ```
 
-Висновок: живу пробу можна було провести лише для Codex.
+Висновок на момент П-0: живу пробу можна було провести лише для Codex. Пізніше того ж дня
+власник установив `agy`, і П-А та П-Б проведено:
 
-### П-А. `agy -p` і скіли з `.agents/skills/` — **не проведена**
+```
+WSL:      /home/yuriy/.local/bin/agy, 1.4.12
+Windows:  %LOCALAPPDATA%\agy\bin\agy.exe, 1.4.12 (у PATH сесії, запущеної до установки, його немає)
+~/.gemini/antigravity-cli/settings.json: {}     # вхід через акаунт, без API-ключа
+```
 
-Причина: `agy` не встановлено. Установка — `irm https://antigravity.google/cli/install.ps1 | iex`
-(Windows) або `curl … | bash` (Linux), тобто виконання віддаленого скрипта; без власника я цього
-не роблю.
+### П-А. `agy -p`: скіли, запис, режими — **проведена**
 
-Що каже документація (третіх сторін, не офіційна):
-- `-p/--print` — неінтерактивний запуск; `--output-format text|json|stream-json`;
-  `--print-timeout` (дефолт `5m`); `--disable-slash-commands` вимикає розгортання скілів у
-  print-режимі, тобто за замовчуванням вони, ймовірно, ввімкнені;
-- скіли робочого простору: `.agents/skills/<name>.md` або `.agents/skills/<name>/SKILL.md`;
-  глобальні — `~/.gemini/antigravity-cli/skills/`; правила — `GEMINI.md`, `AGENTS.md`,
-  `.agents/rules/*.md`; чи вантажиться `AGENTS.md` у `-p`, документація не каже;
-- інструменти запису й команд у headless за замовчуванням «Ask», тобто м'яко відхиляються.
-  Режиму read-only немає, є `--sandbox` (обмеження виконання в терміналі) і `--mode plan`.
+Тимчасові git-репо у WSL `/tmp`; для Windows — у скретчпаді, запуск з Git Bash. Скіл
+`.agents/skills/detent-probe/SKILL.md` той самий, що в П-В2. Stdin кожного виклику закритий.
 
-Що зробити, коли `agy` буде: у тимчасовому репо зі скілом `detent-probe` (як П-В2)
-`agy -p 'What is the detent probe word?…' < /dev/null`, потім спроба запису файлу без
-`--dangerously-skip-permissions` і з `--sandbox`/`--mode plan`, потім некоректна модель, щоб
-побачити рядок помилки.
+**П-А1, П-А2, П-А-Win: скіли.**
 
-### П-Б. Gemini 4 Argon в Antigravity CLI і запасна дорога — **не проведена**
+```
+A1  agy -p 'What is the detent probe word? Name the skill you used, if any.'
+    exit=0  The detent probe word is **TURNSTILE-42**. Skill used: `detent-probe` ([SKILL.md](file:///tmp/…/.agents/skills/detent-probe/SKILL.md))
+A2  agy -p 'List, verbatim, the names of all skills available to you…'
+    exit=0  - `agy-customizations`  - `antigravity-guide`  - `detent-probe`
+Win agy.exe -p '<як A1>'   (Git Bash, Windows)
+    exit=0  The detent probe word is **TURNSTILE-42**. Skill used: `detent-probe` (…file:///C:/Users/…/SKILL.md)
+```
 
-Причина та сама. За публічними звітами (жовтень 2026):
-- модель вийшла 2026-10-13, ID в API — `gemini-4-argon`;
-- в `agy` 1.3.4–1.3.5 вона не розпізнавалася («model gemini-4-argon is not recognized… Using
-  "Gemini 3.8 Flash (High)" instead»), мейнтейнер позначив фікс у 1.4.3. Тобто **CLI тихо
-  підмінює модель** — і це дефект для рецензента: маркер назвав би Argon, а рецензував би
-  Flash. Наслідок для дизайну: адаптер `agy` мусить перевіряти назву моделі у виводі або
-  відмовлятися, якщо підтвердити її неможливо — це вирішить П-Б;
-- доступ залежить від тарифу (Ultra; про Pro джерела суперечать) і версії клієнта;
-- запасна дорога: `"modelProvider": "gemini"` у `~/.gemini/antigravity-cli/settings.json` +
-  `GEMINI_API_KEY`. Ключ платний поза Free tier, а Argon на Free tier, за звітами, недоступна.
+**П-А3: порядок аргументів.**
 
-Що зробити: `agy --version` (≥ 1.4.3), `agy models` на акаунті власника; `agy -p 'reply PONG'
---model gemini-4-argon` і перевірити, чи є попередження про підміну в stderr; те саме з
-`GEMINI_API_KEY`.
+```
+agy -p --sandbox '…'
+exit=2  Error: -p took "--sandbox" as its prompt, so the intended prompt was left as an argument and ignored.
+```
+
+Так само з `--mode` і `--model` після `-p`. Прапорці — лише до `-p`.
+
+**П-А3…П-А8: запис файлів.** Кожен промпт просить створити файл; після виклику скрипт
+перевіряє, чи файл справді є.
+
+| Проба | Прапорці | Ціль | Файл з'явився | Що сказав `agy` / stderr |
+|---|---|---|---|---|
+| A4 | — | `written2.txt` у репо | **YES** | «I called `write_file`… succeeded without any permission denial» |
+| A3 | `--sandbox` | `written.txt` у репо | **YES** | `write_file` пройшов; shell `printf y > shell.txt` — ні: stderr `jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied…`, **exit 0**, stdout порожній |
+| A6 | `--sandbox` | `/tmp/detent-outside-…-a6` поза репо | **YES** | «`write_file`… succeeded without error» |
+| A7 | — | `/tmp/detent-outside-…-a7` поза репо | **YES** | те саме |
+| A5 | `--mode plan` | `written3.txt` у репо, без примусу | no | «created the implementation plan artifact at …/.gemini/antigravity-cli/brain/…/implementation_plan.md… awaiting your approval» |
+| A8 | `--mode plan` | `/tmp/detent-outside-…-a8`, «without asking for approval» | **YES** | «`write_file`… succeeded… without error or restriction» |
+
+**П-А-S: сесійне deny-правило.** `agy --settings '<json>' -p 'створи /tmp/…-<n> через write_file,
+потім зміни note.txt будь-яким edit-інструментом'`:
+
+| | `--settings` | Поза репо | `note.txt` | Відповідь |
+|---|---|---|---|---|
+| S1 | `{"permissions":{"deny":["write_file"]}}` | **YES** | змінено | правило мовчки не діє |
+| S2 | `{"permissions":{"deny":["write_file(*)","edit(*)","replace(*)"]}}` | no | без змін | `Permission denied for write_file(/tmp/…). Matches user-configured deny rule.` — і для `edit_file` теж перевіряється як `write_file` |
+| S3 | `{"permissions":{"deny":["write(*)","edit(*)"]}}` | **YES** | змінено | правило мовчки не діє |
+| S4 | `{"permissions":{"defaultMode":"deny","allow":["read(*)"]}}` | **YES** | змінено | правило мовчки не діє |
+
+Після всіх запусків `~/.gemini/antigravity-cli/settings.json` лишився `{}`: `--settings` справді
+сесійний. Окремо для `edit(*)` і `replace(*)` у S2 не перевірялося, чи вони щось додають: правка
+блокується вже через `write_file(*)`.
+
+**Висновок.** У `agy` немає режиму без запису, а доступні прапорці його не дають.
+Read-only можна отримати лише правилом `write_file(*)`, і помилка в його синтаксисі нічим не
+виявляється. Звідси канарка в адаптері. Довідка третіх сторін («запис у headless м'яко
+відхиляється», `--print-timeout` 5 хв) виявилася хибною в обох пунктах: `agy --help` 1.4.12 каже
+`--print-timeout … (default 0s)`.
+
+### П-Б. Gemini 4 Argon в `agy` — **проведена**
+
+```
+agy models          (WSL і Windows однаково)
+gemini-4-argon-medium / -high / -low    Gemini 4 Argon (Medium|High|Low)
+gemini-3.8-flash-high / -medium / -low
+claude-opus-5-5-low / -medium / -high   claude-sonnet-5-5-low / -medium / -high
+gpt-oss-120b-medium
+
+B1  agy --model gemini-4-argon --output-format json -p 'Reply PONG and name the model you are.'
+    exit=0  {"status":"SUCCESS","response":"PONG! I am Gemini 4 Argon.\n","usage":{"input_tokens":6835,"output_tokens":14,…}}
+    stderr порожній: попередження про підміну немає
+B3  agy --model gemini-4-argon-high --output-format json -p '<те саме>'
+    exit=0  "response":"PONG\n\nI am Gemini 4 Argon.\n", "thinking_tokens":128
+B2  agy --model no-such-model-xyz -p 'Reply PONG'
+    exit=1  error: invalid model selection (--model "no-such-model-xyz" --effort ""): model no-such-model-xyz is not recognized as a known model or custom model in settings
+            Available models:
+              Gemini 4 Argon (Medium) …
+```
+
+Висновок: Argon доступна на акаунті власника без API-ключа. Невідома модель у 1.4.12 дає
+помилку, а не підміну, як у 1.3.x. Поле моделі в JSON-конверті відсутнє, тож модель у маркері
+— заява CLI (див. «Заявка → доказ»). У списку є Claude-моделі, тому правило «рецензент ≠ автор»
+порівнює родини. Запасна дорога `modelProvider: gemini` + `GEMINI_API_KEY` не знадобилась і
+не перевірялась.
+
+**П-А9/А10, форма звіту.** `agy --model gemini-4-argon [--mode plan] -p '<рев'ю math.js з
+навмисним a - b>'`: обидва exit 0, одна знахідка `math.js:2`, останній рядок
+`CROSS-REVIEW-RESULT: 1 findings`. Протокол рядка результату працює й для `agy`.
 
 ### П-В. Codex CLI як read-only рецензент — **проведена**
 
@@ -627,6 +705,14 @@ override про `bounded` треба переписати під нові гіл
 - Windows: раннер warsaw жив у WSL. detent мусить працювати й у PowerShell: шляхи через
   `node:path`, без `bash -lc`, `spawnSync` без shell. Тест — на обох.
 - Ім'я `detent` на npm вільне (за постановкою задачі, не перевірено тут).
+- `agy` на Windows ставиться в `%LOCALAPPDATA%\agy\bin` і потрапляє лише в користувацький
+  PATH, тож процес, запущений до установки, його не бачить (П-0). Повідомлення «бінарника немає
+  в PATH» мусить називати це місце.
+- `--settings` з JSON передається одним аргументом через `spawnSync` без shell. На Windows Node
+  сам екранує лапки для `CreateProcess`, але канарка — єдине, що це доводить; тест мусить
+  ганяти канарку і в Windows, і у WSL.
+- Канарка доводить, що правило блокує `write_file` у новій сесії з тими ж аргументами. Що воно
+  діє й у сесії рев'ю, випливає з однакових аргументів, а не з окремого виміру.
 
 ## Рев'ю спеки
 
