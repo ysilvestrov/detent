@@ -94,6 +94,19 @@ describe('pr-slicing skill', () => {
       '- (c) it needs no new decision.',
     ]);
   });
+  const flat = skill.replace(/\s+/g, ' ');
+  test('saves plans in monthly folders', () => {
+    expect(flat.includes('save them under `<plansDir>/<YYYY-MM>/`.')).toBe(true);
+  });
+  test("with Superpowers, the core plan's final review is the end-to-end review", () => {
+    expect(flat.includes('With Superpowers, the final whole-branch review of the core plan is this review.')).toBe(true);
+  });
+  test('the next review package starts before the inline task', () => {
+    expect(flat.includes("Record the base commit before the inline task, so that the next task's review package starts from it.")).toBe(true);
+  });
+  test('the dispatch rule is scoped to subagent-driven-development', () => {
+    expect(flat.includes('With `superpowers:executing-plans` every task is done inline; the dispatch rule applies only to `superpowers:subagent-driven-development`.')).toBe(true);
+  });
 });
 
 describe('cross-review skill', () => {
