@@ -23,7 +23,7 @@ describe('decideMode', () => {
   it('reviews in full when the settings changed, even with the same head', () => {
     const d = decideMode({ state: state({ head: HEAD, scope: 'a' }), headSha: HEAD, baseRef: 'main', scope: 'b', ...deps() });
     expect(d.mode).toBe('full');
-    expect(d.diffSpec).toBe('origin/main...HEAD');
+    expect(d.diffSpec).toBe('refs/remotes/origin/main...HEAD');
     expect(d.reason).toContain('settings changed');
   });
 
@@ -40,7 +40,7 @@ describe('decideMode', () => {
   it('reviews in full when there is no previous state', () => {
     const d = decideMode({ state: null, headSha: HEAD, baseRef: 'main', scope: 'a', ...deps() });
     expect(d.mode).toBe('full');
-    expect(d.diffSpec).toBe('origin/main...HEAD');
+    expect(d.diffSpec).toBe('refs/remotes/origin/main...HEAD');
     expect(d.reason).toMatch(/no previous review/i);
   });
 
@@ -52,7 +52,7 @@ describe('decideMode', () => {
       ...deps({ hasCommit: () => false }),
     });
     expect(d.mode).toBe('full');
-    expect(d.diffSpec).toBe('origin/main...HEAD');
+    expect(d.diffSpec).toBe('refs/remotes/origin/main...HEAD');
     expect(d.reason).toContain(OLD);
   });
 
@@ -96,7 +96,7 @@ describe('decideMode', () => {
       decideMode({ state: state(), headSha: HEAD, baseRef: 'main', scope: 'a', ...deps({ isAncestor: () => false }) }).prSpec,
       decideMode({ state: state(), headSha: HEAD, baseRef: 'main', scope: 'a', ...deps() }).prSpec,
     ];
-    expect(specs).toEqual(['origin/main...HEAD', 'origin/main...HEAD', 'origin/main...HEAD', 'origin/main...HEAD', 'origin/main...HEAD']);
+    expect(specs).toEqual(['refs/remotes/origin/main...HEAD', 'refs/remotes/origin/main...HEAD', 'refs/remotes/origin/main...HEAD', 'refs/remotes/origin/main...HEAD', 'refs/remotes/origin/main...HEAD']);
   });
 });
 

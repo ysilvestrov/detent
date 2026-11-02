@@ -64,7 +64,7 @@ describe('resolveReplayBase', () => {
       head: 'head-sha',
       mergeBase: (a, b) => `merge-base(${a},${b})`,
     });
-    expect(base).toBe('merge-base(origin/main,head-sha)');
+    expect(base).toBe('merge-base(refs/remotes/origin/main,head-sha)');
   });
 
   it('uses an explicit base verbatim so an incremental push can be replayed', () => {

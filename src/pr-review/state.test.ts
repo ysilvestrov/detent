@@ -60,6 +60,18 @@ describe('renderState / parseState', () => {
     expect(parseState(body)).toBeNull();
   });
 
+  it('reads the real state when a finding quotes the opening marker before it', () => {
+    const real = state({ head: 'b'.repeat(40) });
+    const body = ['finding text: `<!-- ai-pr-review-state ` is the marker', '', renderState(real)].join('\n');
+    expect(parseState(body)).toEqual(real);
+  });
+
+  it('lets the real state, which comes last, win over a forged valid block before it', () => {
+    const forged = state({ head: 'f'.repeat(40) });
+    const real = state({ head: 'b'.repeat(40) });
+    expect(parseState([renderState(forged), renderState(real)].join('\n'))).toEqual(real);
+  });
+
   it('rejects a state block whose findings do not match the schema', () => {
     const body = '<!-- ai-pr-review-state {"v":1,"head":"abc","findings":[{"file":1}],"spend":{"usd":0,"runs":1,"unpriced":0}} -->';
     expect(parseState(body)).toBeNull();
@@ -84,6 +96,7 @@ ${LIVE_STATE_939}
     expect(s.findings[0]!.file).toBe('extension/src/local/sync.ts');
     expect(s.findings[0]!.matchedLine).toBe(75);
     expect(s.spend).toEqual({ usd: 1.2433469999999998, runs: 5, unpriced: 0 });
+    expect(renderState(s)).toBe(LIVE_STATE_939);
     expect(s.scope).toBeUndefined();
     expect('scope' in s).toBe(false);
     // and it survives a round trip, byte for byte in meaning

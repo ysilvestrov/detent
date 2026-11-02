@@ -71,11 +71,12 @@ export async function runFind(
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new Error(`Pass-1 output could not be parsed as JSON: ${raw.slice(0, 300)}`);
+    // No raw text and no parser message (V8 quotes the input): this reaches the public failure comment.
+    throw new Error('Pass-1 output could not be parsed as JSON');
   }
 
   if (!isFindings(parsed)) {
-    throw new Error(`Pass-1 output did not match the schema: ${raw.slice(0, 300)}`);
+    throw new Error('Pass-1 output did not match the schema');
   }
   // Only the known fields, as zod.object returned them: a stray key from the model stays out.
   const findings: RawFinding[] = parsed.findings.map((f) => ({
