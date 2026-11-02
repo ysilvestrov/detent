@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 import { planInstall, plannedPaths, type InstallInput, type InstallPlan, type Action } from './plan.js';
 
-const B = '<!-- detent:constitution v1 begin — edit outside these markers; `npx detent install` rewrites this block -->';
+const B = '<!-- detent:constitution v1 begin — edit outside these markers; `npx -y @ysilvestrov/detent install` rewrites this block -->';
 const E = '<!-- detent:constitution end -->';
 const DEV = 'Without Superpowers, start any behaviour change with `detent-dev-cycle`';
 const AGENTS_LINE =

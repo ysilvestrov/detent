@@ -126,9 +126,9 @@ describe('cross-review skill', () => {
     expect(skill.includes('Never pass `--reviewer`')).toBe(true);
   });
   test('the commands it runs pass --author and no --reviewer', () => {
-    expect(skill.match(/^npx detent cross-review .*$/gm)).toEqual([
-      'npx detent cross-review --author <id>                # the branch against baseBranch',
-      'npx detent cross-review --author <id> --spec <file>  # a committed spec',
+    expect(skill.match(/^npx -y @ysilvestrov\/detent cross-review .*$/gm)).toEqual([
+      'npx -y @ysilvestrov/detent cross-review --author <id>                # the branch against baseBranch',
+      'npx -y @ysilvestrov/detent cross-review --author <id> --spec <file>  # a committed spec',
     ]);
   });
   test('runs in the background', () => {
@@ -194,6 +194,13 @@ describe('constitution', () => {
   });
   test('has the eight rules', () => {
     expect(text.match(/^\d\. \*\*/gm)).toEqual(['1. **', '2. **', '3. **', '4. **', '5. **', '6. **', '7. **', '8. **']);
+  });
+});
+
+describe('the command in the rules', () => {
+  const files = [...filesUnder('skills'), ...filesUnder('constitution')];
+  test.each(files)('%s names the scoped package, not bare `npx detent`', (file) => {
+    expect(read(file).includes('npx detent')).toBe(false);
   });
 });
 
