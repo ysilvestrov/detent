@@ -12,7 +12,7 @@ import { detectSuperpowers, detentPluginEnabled, type SuperpowersFinding } from 
 
 export const EXIT = { ok: 0, usage: 2, conflict: 4 } as const;
 
-export const USAGE = 'Usage: detent install [--claude] [--agents] [--dry-run] [--superpowers yes|no]';
+export const USAGE = 'Usage: npx -y @ysilvestrov/detent install [--claude] [--agents] [--dry-run] [--superpowers yes|no]';
 
 type Env = Readonly<Record<string, string | undefined>>;
 

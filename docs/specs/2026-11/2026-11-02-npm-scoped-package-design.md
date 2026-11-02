@@ -120,6 +120,11 @@ gate (`npm test && npm run typecheck`) його не збирає, тоді як
 
 Історичні спеки й плани не правимо: це запис того, що було.
 
+**Рядки usage:**
+- `src/commands/install.ts`, `src/commands/cross-review.ts` і `src/cli.ts` теж переходять на нову форму
+  (`Usage: npx -y @ysilvestrov/detent …`); пінінги в `src/commands/install.test.ts` і
+  `src/commands/cross-review.test.ts` оновлюються разом з ними.
+
 **README:**
 - розділ установки: `npm i -D @ysilvestrov/detent` і одноразово `npx -y @ysilvestrov/detent install`;
 - прибрати рядки про git-установку, `prepare` і попередження `install-scripts` у розділі обмежень;
@@ -127,7 +132,9 @@ gate (`npm test && npm run typecheck`) його не збирає, тоді як
   `npm i -D @ysilvestrov/detent`), запустити `install`; блок, змінений вручну або без запису в
   маніфесті, дає конфлікт і нічого не пише (П-4), його треба полагодити руками;
 - обмеження: скіли плагіна Claude оновлюються разом із плагіном, а не через `install`;
-- випуск: розділ для власника (тег, чистий checkout, `npm publish`, перевірка shasum).
+- випуск: розділ для власника (тег, чистий checkout, `npm publish`, перевірка shasum);
+- примітка «Working on detent itself»: у самому репо форма зі scope не працює, бо npx резолвить ім'я в кореневий
+  пакет без bin; потрібен `node dist/cli.js` або `npx detent` після збірки.
 
 **`detent.json`, `reviewContext`:** у цьому репо скіли кажуть форму зі скоупом, а запускати треба
 `npx detent` або `node dist/cli.js` (П-5). Це такий самий відомий виняток, як інші, що там уже описані.

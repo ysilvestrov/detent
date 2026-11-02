@@ -25,7 +25,7 @@ The process grew out of a real project and rests on four ideas:
   request opens, the author's work is reviewed by an agent running a model from a different family
   (Anthropic, OpenAI or Google). A different CLI on the same model family doesn't count.
 
-## Release 1 (v0.2.1)
+## Release 1 (v0.3.0)
 
 - **A constitution block** for `CLAUDE.md` and `AGENTS.md`: the spec as the single source of
   truth, classification after the probe, the one-way ratchet, claim → evidence, test quality, the
@@ -117,10 +117,10 @@ In Claude Code the plugin's skills are called `/detent:detent-<name>`, for examp
 `/detent:detent-design-spec`: the plugin name, then the skill's frontmatter `name`.
 
 The plugin gives Claude Code the skills only. It does not install the constitution block: run
-`npx -y @ysilvestrov/detent install --claude` for that. The plugin and the copied skills together give each skill
-twice (the plugin's `/detent:detent-<name>` and `detent-<name>` from `.claude/skills/`); install
-warns when it sees the detent plugin enabled in the project's `.claude/settings.json`. Nothing
-reaches Codex or Antigravity through the plugin.
+`npx -y @ysilvestrov/detent install --claude` for that. The plugin and the copied skills together
+give each skill twice (the plugin's `/detent:detent-<name>` and `detent-<name>` from
+`.claude/skills/`); install warns when it sees the detent plugin enabled in the project's
+`.claude/settings.json`. Nothing reaches Codex or Antigravity through the plugin.
 
 ### Moving from the git install
 
@@ -301,11 +301,21 @@ What release 1 has and has not proved, from the spec's claim → evidence table 
 ## Releasing (for the owner)
 
 1. Merge to `main`, then tag `v<version>` (the version in `package.json`) on the merged commit.
-2. Make a clean checkout of the tag and run `npm ci`.
-3. Run `npm publish` and enter the 2FA code. `publishConfig.access` is already `public`, and
+2. Push the tag: `git push origin v<version>`.
+3. Make a clean checkout of the tag and run `npm ci`, then `npm run gate`.
+   Do not publish if it fails.
+4. Run `npm login`, then `npm publish --dry-run` to see what would be published.
+5. Run `npm publish` and enter the 2FA code. `publishConfig.access` is already `public`, and
    `prepack` builds `dist/`.
-4. Check the registry: `npm view @ysilvestrov/detent version dist.shasum`. The shasum must equal
+6. Check the registry: `npm view @ysilvestrov/detent version dist.shasum`. The shasum must equal
    the one `npm pack --dry-run` prints for the same checkout.
-5. Check the install on npm 11 and on npm 12, in an empty folder and in a folder that has the
+7. Check the install on npm 11 and on npm 12, in an empty folder and in a folder that has the
    dependency. Include `install` in a clean git repository without a `package.json`.
-6. Update the Claude plugin to the new version.
+8. Update the Claude plugin to the new version, as described in the Claude Code plugin section
+   above.
+
+### Working on detent itself
+
+Inside this repository the scoped form `npx -y @ysilvestrov/detent` fails, because npx resolves
+that name to the root package and finds no bin. Use `node dist/cli.js`, or `npx detent` after a
+build.
