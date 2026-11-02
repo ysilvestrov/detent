@@ -86,6 +86,7 @@ const installed = join(consumer, 'node_modules', '@ysilvestrov', 'detent');
 for (const dir of ['skills', 'prompts', 'constitution']) {
   for (const file of filesUnder(join(root, dir))) requireFile(installed, `${dir}/${file}`, 'the installed package');
 }
+requireFile(installed, 'dist/pr-review/index.d.ts', 'the installed package');
 console.log('smoke: ok: the package has every file of skills, prompts and constitution');
 
 const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));

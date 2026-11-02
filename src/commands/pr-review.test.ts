@@ -196,6 +196,7 @@ describe('pr-review in CI', () => {
     const comments = failureComments(h.calls);
     expect(comments).toHaveLength(1);
     expect(comments[0]!.body).toContain('ai-pr-review-failure');
+    expect(h.err.join('\n')).toContain('::error::AI review failed');
     expect([comments[0]!.body, ...h.out, ...h.err].join('\n')).not.toContain(KEY);
   });
 

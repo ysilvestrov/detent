@@ -97,7 +97,7 @@ export interface ReplayArgs {
  * review produced have been fixed by then, which is precisely why they are known
  * to be real. The head the live review saw is in its own state block
  * (`<!-- ai-pr-review-state {"head":…} -->`), or is the commit before the fix.
- * This trap has cost two investigations — warsaw-beer-bot#344 in 2026-07, #418 in 2026-09 —
+ * This trap has cost two investigations — warsaw-beer-bot#344 in 2026-07, warsaw-beer-bot#418 in 2026-09 —
  * which is why it is a flag now rather than a thing to remember.
  */
 export function resolveReplayArgs(argv: readonly string[]): ReplayArgs {
@@ -109,7 +109,7 @@ export function resolveReplayArgs(argv: readonly string[]): ReplayArgs {
     const arg = argv[i]!;
     if (flagsWithValue.includes(arg)) {
       const value = argv[i + 1];
-      if (value === undefined || value.startsWith('--')) {
+      if (!value || value.startsWith('--')) {
         throw new Error(arg === '--provider' ? `--provider needs one of ${PROVIDER_IDS.join('|')}` : `${arg} needs a commit sha`);
       }
       values[arg] = value;

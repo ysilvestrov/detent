@@ -23,6 +23,14 @@ describe('resolveReplayArgs', () => {
     expect(() => resolveReplayArgs(['418', '--base', '--head', 'x'])).toThrow('--base needs a commit sha');
   });
 
+  it('rejects an empty --head, as an empty shell variable gives', () => {
+    expect(() => resolveReplayArgs(['418', '--head', ''])).toThrow('--head needs a commit sha');
+  });
+
+  it('rejects an empty --base', () => {
+    expect(() => resolveReplayArgs(['418', '--base', ''])).toThrow('--base needs a commit sha');
+  });
+
   it('rejects a missing PR number', () => {
     expect(() => resolveReplayArgs([])).toThrow('--replay needs a PR number');
   });
