@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { crossReview, USAGE as CROSS_REVIEW_USAGE } from './commands/cross-review.js';
 import { install, USAGE as INSTALL_USAGE } from './commands/install.js';
+import { prReview, USAGE as PR_REVIEW_USAGE } from './commands/pr-review.js';
 import { TIMEOUT_MS } from './review/cli-runner.js';
 
 const USAGE = `Usage: npx -y @ysilvestrov/detent <command>
@@ -12,6 +13,8 @@ const USAGE = `Usage: npx -y @ysilvestrov/detent <command>
 Commands:
   cross-review   review the branch or a spec by a reviewer of another model family
                  ${CROSS_REVIEW_USAGE.replace('Usage: ', '')}
+  pr-review      review a pull request with an AI model (in GitHub Actions), or replay one locally
+                 ${PR_REVIEW_USAGE.replace('Usage: ', '')}
   install        copy the skills and the constitution block into the project
                  ${INSTALL_USAGE.replace('Usage: ', '')}
 
@@ -23,13 +26,21 @@ function version(): string {
   return (JSON.parse(readFileSync(pkg, 'utf8')) as { version: string }).version;
 }
 
-function main(argv: readonly string[]): number {
+function main(argv: readonly string[]): number | Promise<number> {
   const [command, ...rest] = argv;
   if (command === 'cross-review') {
     return crossReview(rest, {
       cwd: process.cwd(),
       env: process.env,
       timeoutMs: TIMEOUT_MS,
+      out: (line) => process.stdout.write(`${line}\n`),
+      err: (line) => process.stderr.write(`${line}\n`),
+    });
+  }
+  if (command === 'pr-review') {
+    return prReview(rest, {
+      cwd: process.cwd(),
+      env: process.env,
       out: (line) => process.stdout.write(`${line}\n`),
       err: (line) => process.stderr.write(`${line}\n`),
     });
@@ -51,4 +62,4 @@ function main(argv: readonly string[]): number {
   return 2;
 }
 
-process.exitCode = main(process.argv.slice(2));
+process.exitCode = await main(process.argv.slice(2));

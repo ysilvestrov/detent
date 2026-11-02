@@ -45,6 +45,8 @@ function step(command, args, cwd) {
 const detentEnv = { ...process.env, HOME: home, USERPROFILE: home };
 delete detentEnv.DETENT_AUTHOR;
 delete detentEnv.CROSS_REVIEW_ACTIVE;
+// `pr-review` reads the event of a CI run; a smoke run in Actions must not look like one.
+for (const name of ['GITHUB_EVENT_NAME', 'GITHUB_EVENT_PATH', 'GITHUB_REPOSITORY', 'GITHUB_TOKEN']) delete detentEnv[name];
 
 // The local shim itself: `npx` would fall back to a global detent if the package lost its `bin`.
 const shim = join(consumer, 'node_modules', '.bin', process.platform === 'win32' ? 'detent.cmd' : 'detent');
@@ -90,6 +92,13 @@ const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 detent(['--version'], { code: 0, stdout: (out) => out.trim() === version });
 detent(['nope'], { code: 2, stderr: (err) => err.includes('unknown command') });
 detent(['cross-review'], { code: 2, stderr: (err) => err.includes('--author') });
+detent(['pr-review'], { code: 2, stderr: (err) => err.includes('pull_request') });
+
+// The `exports` of the package: the subpath that warsaw-beer-bot imports resolves from a consumer folder.
+writeFileSync(join(consumer, 'exports-check.mjs'), "const m = await import('@ysilvestrov/detent/pr-review');\nconsole.log(typeof m.verifyAll);\n");
+const exportsCheck = run(process.execPath, ['exports-check.mjs'], consumer, detentEnv);
+if (exportsCheck.status !== 0 || exportsCheck.stdout.trim() !== 'function') fail("import('@ysilvestrov/detent/pr-review') does not give verifyAll as a function", exportsCheck);
+console.log('smoke: ok: @ysilvestrov/detent/pr-review exports verifyAll');
 
 const install = ['install', '--claude', '--agents'];
 detent([...install, '--dry-run'], { code: 0, stdout: (out) => out.includes('nothing written') });
