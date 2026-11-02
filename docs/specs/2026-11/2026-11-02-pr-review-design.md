@@ -208,8 +208,9 @@ detent pr-review --replay <n> [--head <sha>] [--base <sha>] [--provider <id>]  #
 
 Бюджет контексту й інші константи лишаються в коді.
 
-Конфіг читається через `git show origin/<база>:detent.json`, промпти — через `git show
-origin/<база>:.detent/prompts/pr-review-find.md`, а якщо їх немає, то з пакета. Немає файлу на базі — типові
+Конфіг читається через `git show refs/remotes/origin/<база>:detent.json`, промпти — через `git show
+refs/remotes/origin/<база>:.detent/prompts/pr-review-find.md`, а якщо їх немає, то з пакета. Повне ім'я потрібне, бо тег
+`origin/main` інакше перекрив би гілку, і цього не було б видно в diff. Немає файлу на базі — типові
 значення. Невідомий ключ у `prReview` — код 2: помилка в цьому полі інакше мовчки дала б неправильний обсяг
 рев'ю. `reviewContext` підставляється в типові промпти як `{{reviewContext}}`; перевизначений промпт може
 його не використовувати. Заповнює їх наявний `renderPrompt`.
@@ -227,7 +228,11 @@ origin/<база>:.detent/prompts/pr-review-find.md`, а якщо їх нема�
    env цього кроку.
 
 Код PR не виконується: `npm ci` проєкту не потрібен, на відміну від нинішнього workflow. Модель викликається
-без інструментів, лише текст і JSON-схема.
+без інструментів, лише текст і JSON-схема. Файли з нульовим байтом ідуть лише як diff, бо типове `include` охоплює й
+бінарні файли. Текст моделі не потрапляє в повідомлення про помилки, бо ті публікуються в PR.
+
+Відоме обмеження, те саме, що в рішенні 2: PR, що додає `* -diff` у `.gitattributes`, ховає свій diff від рецензента, і
+рев'ю буде чистим. Сама зміна `.gitattributes` видна в PR.
 
 Workflow проєкту (`examples/pr-review.workflow.yml`): `pull_request` типів `opened, reopened, synchronize`;
 `permissions: contents: read, pull-requests: write`; `concurrency` за номером PR зі скасуванням; умова
@@ -261,8 +266,8 @@ warsaw-beer-bot.
 ### Вимірювання
 
 `--replay` замінює `scripts/ai-review/replay.ts` і є інструментом великого тестування. Корпус для `verify` (`verify-corpus*`) прив'язаний до коду
-warsaw-beer-bot, тож лишається там і бере `verifyAll`, `costUsd`, `addUsage`, `EMPTY_USAGE`,
-`DEFAULT_MAX_COMPLETION_TOKENS` з `@ysilvestrov/detent/pr-review`. Цей імпорт задокументовано як нестабільний:
+warsaw-beer-bot, тож лишається там і бере `verifyAll`, `costUsd`, `addUsage`, `formatTokens`, `EMPTY_USAGE`,
+`DEFAULT_MAX_COMPLETION_TOKENS` з `@ysilvestrov/detent/pr-review`; для звірки виходу звідти ж `loadSettings` і `PROVIDERS`. Цей імпорт задокументовано як нестабільний:
 warsaw-beer-bot закріплює точну версію (уже так: `"@ysilvestrov/detent": "0.3.0"`). Додавання `exports`
 обмежує прямий імпорт інших шляхів пакета; `bin` воно не зачіпає, але `smoke` це підтвердить.
 
