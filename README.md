@@ -171,7 +171,7 @@ Reviewers and what keeps each read-only:
 |---|---|---|---|
 | `codex` | OpenAI | `codex exec -s read-only --ephemeral -o <report> [-m <model>] <prompt>` | the Codex sandbox |
 | `claude` | Anthropic | `claude -p --restricted --strict-mcp-config --tools Read,Grep,Glob --add-dir <runDir> [--model <m>] -- <prompt>` | a tool set without write tools |
-| `agy` | Google | `agy --settings '{"permissions":{"deny":["write_file(*)"]}}' --sandbox --model <m> --output-format text -p <prompt>` | a session deny rule, proved by a canary on every run |
+| `agy` | Google | `agy --settings '{"permissions":{"deny":["write_file(*)"]}}' --sandbox --model <m> --output-format text --add-dir <runDir> -p <prompt>` | a session deny rule, proved by a canary on every run |
 
 ### The chain
 
@@ -208,6 +208,17 @@ Other canary details: `deny rule ineffective (canary file was written)`, `timeou
 (stops the chain), `did not run to completion: …`, agy's own error line, `exited with code <n>`.
 The canary costs one extra model call per run. **MCP servers you connect to `agy` are not covered
 by the rule**: a reviewer can call their tools.
+
+Headless `agy` auto-denies a shell command and a read outside its working directory, and the model
+then ends its turn with an empty answer: exit 0, no report. So `--add-dir <runDir>` lets it read the
+diff, and the adapter puts a short preamble before the review prompt (your `.detent/prompts/`
+override too): no shell, read only inside the snapshot, skip a missing file and still report. This
+lowers the odds of that failure but does not rule it out; when it happens the marker says
+`output does not end with a CROSS-REVIEW-RESULT line`, and `jetski: no output produced…` in
+`reviewer.log` names the denied tool. A report can also mean a file was skipped: the reviewer says
+so in the report. detent adds no allow rule, so the shell stays closed unless your own `agy`
+settings allow `command`; how a global allow combines with the session settings is not checked,
+and the canary would not detect it.
 
 ### Output and exit codes
 
