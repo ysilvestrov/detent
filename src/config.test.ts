@@ -150,3 +150,27 @@ describe('parseConfig — errors', () => {
     expect(parseConfig('{"reviewContext":["a"]}')).toEqual({ ok: false, error: 'detent.json: "reviewContext" must be a string' });
   });
 });
+
+describe('prReview', () => {
+  const pr = (v: unknown) => parseConfig(JSON.stringify({ prReview: v }));
+  test('a valid prReview is kept', () => {
+    const prReview = { provider: 'openrouter', include: ['src/**'], ignore: ['a'], bodyExclude: ['b'], bodyInclude: ['c'], findModel: 'f', verifyModel: 'v' };
+    expect(pr(prReview)).toEqual({ ok: true, config: { ...DEFAULTS, prReview } });
+  });
+  test('an absent prReview leaves no field', () => {
+    const r = parseConfig('{}');
+    expect(r.ok && 'prReview' in r.config).toBe(false);
+  });
+  test('an unknown key is named', () => {
+    expect(pr({ endpoint: 'x' })).toEqual({ ok: false, error: 'detent.json: unknown key "endpoint" in "prReview"' });
+  });
+  test.each([
+    ['unknown provider', { provider: 'x' }],
+    ['include string', { include: 'a' }],
+    ['include non-string item', { include: [1] }],
+    ['empty findModel', { findModel: '' }],
+    ['non-object', 'x'],
+  ])('%s is an error', (_n, v) => {
+    expect(pr(v).ok).toBe(false);
+  });
+});

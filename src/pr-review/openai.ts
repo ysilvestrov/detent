@@ -60,7 +60,32 @@ export async function callStructured(
   format: JsonSchemaFormat,
   maxCompletionTokens: number = DEFAULT_MAX_COMPLETION_TOKENS,
 ): Promise<{ content: string; usage: Usage }> {
-  const fetchFn = deps.fetchFn ?? fetch;
+  try {
+    return await request(deps, messages, format, maxCompletionTokens);
+  } catch (err) {
+    throw scrubKey(err, deps.apiKey);
+  }
+}
+
+/**
+ * The error with every occurrence of the API key replaced by `***`. A provider may echo
+ * the key back in an error body, and the message ends up in a public PR comment and a CI
+ * log. An empty key replaces nothing: `replaceAll('', ...)` would put the mask between
+ * every character.
+ */
+function scrubKey(err: unknown, key: string): unknown {
+  if (key === '' || !(err instanceof Error) || !err.message.includes(key)) return err;
+  const message = err.message.replaceAll(key, '***');
+  return err instanceof NonRetryableError ? new NonRetryableError(message, err.usage) : new Error(message);
+}
+
+async function request(
+  deps: OpenAiDeps,
+  messages: ChatMessage[],
+  format: JsonSchemaFormat,
+  maxCompletionTokens: number,
+): Promise<{ content: string; usage: Usage }> {
+  const fetchFn =deps.fetchFn ?? fetch;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const attempts = deps.attempts ?? 3;
   const name = deps.providerName ?? 'OpenAI';

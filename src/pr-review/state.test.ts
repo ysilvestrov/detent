@@ -127,3 +127,21 @@ describe('capOpenFindings', () => {
     expect(out.kept.map((i) => i.finding.claim)).not.toContain(`p2-${MAX_OPEN_FINDINGS - 1}`);
   });
 });
+
+describe('parseState: unknown keys', () => {
+  it('drops unknown keys on the state, a finding and the spend', () => {
+    const s = state();
+    const dirty = {
+      ...s,
+      extra: 1,
+      findings: [{ ...s.findings[0], extra: 2 }],
+      spend: { ...s.spend, extra: 3 },
+    };
+    const body = `x\n<!-- ai-pr-review-state ${JSON.stringify(dirty)} -->`;
+    const out = parseState(body);
+    expect(out).toEqual(s);
+    expect(out).not.toHaveProperty('extra');
+    expect(out!.findings[0]).not.toHaveProperty('extra');
+    expect(out!.spend).not.toHaveProperty('extra');
+  });
+});
