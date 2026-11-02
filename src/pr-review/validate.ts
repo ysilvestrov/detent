@@ -71,6 +71,7 @@ function isStoredFinding(v: unknown): boolean {
 export function isReviewState(v: unknown): v is ReviewState {
   if (!isObj(v) || v.v !== 1 || !isStr(v.head)) return false;
   if (!Array.isArray(v.findings) || !v.findings.every(isStoredFinding)) return false;
+  if (v.scope !== undefined && !isStr(v.scope)) return false;
   const s = v.spend;
   return isObj(s) && typeof s.usd === 'number' && isInt(s.runs) && isInt(s.unpriced);
 }

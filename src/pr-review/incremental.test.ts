@@ -20,8 +20,25 @@ const deps = (over: Partial<{ hasCommit: (s: string) => boolean; isAncestor: (a:
 });
 
 describe('decideMode', () => {
+  it('reviews in full when the settings changed, even with the same head', () => {
+    const d = decideMode({ state: state({ head: HEAD, scope: 'a' }), headSha: HEAD, baseRef: 'main', scope: 'b', ...deps() });
+    expect(d.mode).toBe('full');
+    expect(d.diffSpec).toBe('origin/main...HEAD');
+    expect(d.reason).toContain('settings changed');
+  });
+
+  it('decides by the head when the scope is the same', () => {
+    expect(decideMode({ state: state({ head: HEAD, scope: 'a' }), headSha: HEAD, baseRef: 'main', scope: 'a', ...deps() }).mode).toBe('republish');
+    expect(decideMode({ state: state({ scope: 'a' }), headSha: HEAD, baseRef: 'main', scope: 'a', ...deps() }).mode).toBe('incremental');
+  });
+
+  it('trusts a state that has no scope, as one written before the field existed', () => {
+    expect(decideMode({ state: state({ head: HEAD }), headSha: HEAD, baseRef: 'main', scope: 'b', ...deps() }).mode).toBe('republish');
+    expect(decideMode({ state: state(), headSha: HEAD, baseRef: 'main', scope: 'b', ...deps() }).mode).toBe('incremental');
+  });
+
   it('reviews in full when there is no previous state', () => {
-    const d = decideMode({ state: null, headSha: HEAD, baseRef: 'main', ...deps() });
+    const d = decideMode({ state: null, headSha: HEAD, baseRef: 'main', scope: 'a', ...deps() });
     expect(d.mode).toBe('full');
     expect(d.diffSpec).toBe('origin/main...HEAD');
     expect(d.reason).toMatch(/no previous review/i);
@@ -31,7 +48,7 @@ describe('decideMode', () => {
     const d = decideMode({
       state: state(),
       headSha: HEAD,
-      baseRef: 'main',
+      baseRef: 'main', scope: 'a',
       ...deps({ hasCommit: () => false }),
     });
     expect(d.mode).toBe('full');
@@ -40,7 +57,7 @@ describe('decideMode', () => {
   });
 
   it('republishes without any API call when HEAD has not moved', () => {
-    const d = decideMode({ state: state({ head: HEAD }), headSha: HEAD, baseRef: 'main', ...deps() });
+    const d = decideMode({ state: state({ head: HEAD }), headSha: HEAD, baseRef: 'main', scope: 'a', ...deps() });
     expect(d.mode).toBe('republish');
   });
 
@@ -48,7 +65,7 @@ describe('decideMode', () => {
     const d = decideMode({
       state: state({ head: HEAD }),
       headSha: HEAD,
-      baseRef: 'main',
+      baseRef: 'main', scope: 'a',
       ...deps({ isAncestor: () => true }),
     });
     expect(d.mode).toBe('republish');
@@ -58,7 +75,7 @@ describe('decideMode', () => {
     const d = decideMode({
       state: state(),
       headSha: HEAD,
-      baseRef: 'main',
+      baseRef: 'main', scope: 'a',
       ...deps({ isAncestor: () => false }),
     });
     expect(d.mode).toBe('full');
@@ -66,18 +83,18 @@ describe('decideMode', () => {
   });
 
   it('reviews incrementally from the stored head on an ordinary push', () => {
-    const d = decideMode({ state: state(), headSha: HEAD, baseRef: 'main', ...deps() });
+    const d = decideMode({ state: state(), headSha: HEAD, baseRef: 'main', scope: 'a', ...deps() });
     expect(d.mode).toBe('incremental');
     expect(d.diffSpec).toBe(`${OLD}..HEAD`);
   });
 
   it('names the PR\'s own diff in every mode, so the runner can scope an incremental pass', () => {
     const specs = [
-      decideMode({ state: null, headSha: HEAD, baseRef: 'main', ...deps() }).prSpec,
-      decideMode({ state: state(), headSha: HEAD, baseRef: 'main', ...deps({ hasCommit: () => false }) }).prSpec,
-      decideMode({ state: state({ head: HEAD }), headSha: HEAD, baseRef: 'main', ...deps() }).prSpec,
-      decideMode({ state: state(), headSha: HEAD, baseRef: 'main', ...deps({ isAncestor: () => false }) }).prSpec,
-      decideMode({ state: state(), headSha: HEAD, baseRef: 'main', ...deps() }).prSpec,
+      decideMode({ state: null, headSha: HEAD, baseRef: 'main', scope: 'a', ...deps() }).prSpec,
+      decideMode({ state: state(), headSha: HEAD, baseRef: 'main', scope: 'a', ...deps({ hasCommit: () => false }) }).prSpec,
+      decideMode({ state: state({ head: HEAD }), headSha: HEAD, baseRef: 'main', scope: 'a', ...deps() }).prSpec,
+      decideMode({ state: state(), headSha: HEAD, baseRef: 'main', scope: 'a', ...deps({ isAncestor: () => false }) }).prSpec,
+      decideMode({ state: state(), headSha: HEAD, baseRef: 'main', scope: 'a', ...deps() }).prSpec,
     ];
     expect(specs).toEqual(['origin/main...HEAD', 'origin/main...HEAD', 'origin/main...HEAD', 'origin/main...HEAD', 'origin/main...HEAD']);
   });

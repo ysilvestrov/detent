@@ -73,6 +73,10 @@ describe('isReviewState', () => {
   it('rejects a non-integer matchedLine', () => {
     expect(isReviewState({ ...state, findings: [{ ...stored, matchedLine: 1.5 }] })).toBe(false);
   });
+  it('accepts a state with a string scope and one without, and rejects a non-string scope', () => {
+    expect(isReviewState({ ...state, scope: 'abc' })).toBe(true);
+    expect(isReviewState({ ...state, scope: 1 })).toBe(false);
+  });
   it('rejects an array and null', () => {
     expect(isReviewState([state])).toBe(false);
     expect(isReviewState(null)).toBe(false);

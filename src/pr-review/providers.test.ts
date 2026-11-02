@@ -24,6 +24,10 @@ describe('selectProvider', () => {
     const r = selectProvider(undefined, { ANTHROPIC_API_KEY: 'k' });
     expect(r).toMatchObject({ kind: 'ok', apiKey: 'k', provider: { id: 'anthropic' } });
   });
+  it('returns the key trimmed, as a pasted secret can carry a newline', () => {
+    expect(selectProvider('openai', { OPENAI_API_KEY: 'sk-abc\n' })).toMatchObject({ kind: 'ok', apiKey: 'sk-abc' });
+    expect(selectProvider(undefined, { ANTHROPIC_API_KEY: '  k \r\n' })).toMatchObject({ kind: 'ok', apiKey: 'k' });
+  });
   it('configured with its own key is ok even when others are set', () => {
     const r = selectProvider('openai', { OPENAI_API_KEY: 'a', ANTHROPIC_API_KEY: 'b' });
     expect(r).toMatchObject({ kind: 'ok', apiKey: 'a', provider: { id: 'openai' } });

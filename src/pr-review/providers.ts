@@ -43,8 +43,8 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
 };
 
 function keyOf(p: Provider, env: Env): string | undefined {
-  const v = env[p.keyEnv];
-  return v !== undefined && v.trim() !== '' ? v : undefined;
+  const v = env[p.keyEnv]?.trim();
+  return v !== undefined && v !== '' ? v : undefined;
 }
 
 export type Selection =

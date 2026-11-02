@@ -66,6 +66,41 @@ describe('renderState / parseState', () => {
   });
 });
 
+// The state comment of a live review (warsaw-beer-bot#939), written before `scope` existed.
+const LIVE_STATE_939 = "<!-- ai-pr-review-state {\"v\":1,\"head\":\"744314fc8eb4a0976d1bce38c0b503035c26d98e\",\"findings\":[{\"file\":\"extension/src/local/sync.ts\",\"quote\":\"        const profileTotal = page.profileTotal ?? meta.profileTotal;\\n        return {\\n          merged: 0,\\n          alreadyKnown: 0,\\n          pageSize: 0,\\n          nextMaxId: null,\\n          nextCursor: null,\\n          profileTotal,\\n          serverCount,\\n          complete: false,\\n          caughtUp: isCaughtUp({ count: serverCount, profileTotal, ranges: await tx.ranges() }),\\n        };\",\"matchedLine\":75,\"matchedEndLine\":86,\"claim\":\"The local empty-page path uses a newly observed profile total only in its response and does not persist it to local sync metadata.\",\"why_it_breaks\":\"With two stored check-ins and metadata `profileTotal: 2`, an empty page reporting total 5 returns `caughtUp: false`, but the next `getState()` still reads total 2 from metadata and can return `caughtUp: true`, making the popup incorrectly show the history as fully synced.\",\"severity\":\"P1\",\"evidence\":\"In the `verdict.kind === 'empty'` branch, `profileTotal` is computed from `page.profileTotal ?? meta.profileTotal` and returned without any `tx.putMeta`, while `getState()` later reads `profileTotal` only from `meta.profileTotal`.\"},{\"file\":\"extension/src/background/sync-scheduler.ts\",\"quote\":\"      const after = await readIntent();\\n      // Stop removed the intent while the step ran — also when a Sync after it already wrote a new\\n      // one: that is a request of its own, not this step's to settle. The loop runs it next.\\n      if (!after || (step.signal.aborted && after.id !== intent.id)) {\\n        await deps.onReport({ outcome: { ...outcome, status: 'cancelled' }, kind: intent.kind, \",\"matchedLine\":204,\"matchedEndLine\":208,\"claim\":\"A manual intent created after a step finishes but before `readIntent()` is incorrectly settled using the preceding step's outcome, so the new Sync request can be discarded without running.\",\"why_it_breaks\":\"If a silent step returns `gap` and the user presses Sync before `readIntent()` completes, `after` is the new manual intent; because the step was not aborted, the code calls `settle(outcome, after)`, clears the new intent, and reports the old `gap` instead of running a manual step.\",\"severity\":\"P1\",\"evidence\":\"In runLoop, a newly written intent read into `after` is only protected when `step.signal.aborted && after.id !== intent.id`; otherwise non-`capped` outcomes call `settle(outcome, after)`, which clears `after.id`.\"},{\"file\":\"extension/src/background/sync-scheduler.ts\",\"quote\":\"      // A start written after the step ended, before this read, has its own id: a request of its own,\\n      // not this step's to settle — whatever the step ended with (a gap, a pause, an error). The loop\\n      // runs it next, and it reports its own verdict.\\n      if (after.id !== intent.id) continue;\",\"matchedLine\":211,\"matchedEndLine\":214,\"claim\":\"The new intent-ID check only detects a manual start that is stored before this snapshot, leaving a race where a start immediately after the snapshot can still be affected by the old blocked step's settlement.\",\"why_it_breaks\":\"If a blocked step finishes and `readIntent()` returns the old intent, then `startManual()` begins while `settle()` is awaiting the asynchronous `PAUSE_KEY` write, the manual start can remove the pause and install its new intent before settlement acquires the intent chain; settlement then sees the changed ID and skips its report, but the earlier blocked-step pause write can complete after the manual removal and remain stored, causing later silent checks to return `paused` even after the manual sync succeeds.\",\"severity\":\"P1\",\"evidence\":\"In `settle()`, `deps.store.set(PAUSE_KEY, ...)` happens before the `withIntent` ID check, while `startManual()` removes `PAUSE_KEY` outside `intentChain` before writing its new intent, allowing the pause write to land after the manual removal.\"}],\"spend\":{\"usd\":1.2433469999999998,\"runs\":5,\"unpriced\":0}} -->";
+
+describe('a state written before scope existed', () => {
+  it('reads without loss and has no scope', () => {
+    const s = parseState(`## 🤖 AI PR Review
+
+text
+
+${LIVE_STATE_939}
+`)!;
+    expect(s).not.toBeNull();
+    expect(s.v).toBe(1);
+    expect(s.head).toBe('744314fc8eb4a0976d1bce38c0b503035c26d98e');
+    expect(s.findings).toHaveLength(3);
+    expect(s.findings[0]!.file).toBe('extension/src/local/sync.ts');
+    expect(s.findings[0]!.matchedLine).toBe(75);
+    expect(s.spend).toEqual({ usd: 1.2433469999999998, runs: 5, unpriced: 0 });
+    expect(s.scope).toBeUndefined();
+    expect('scope' in s).toBe(false);
+    // and it survives a round trip, byte for byte in meaning
+    expect(parseState(renderState(s))).toEqual(s);
+  });
+});
+
+describe('scope in the state', () => {
+  it('round-trips a scope', () => {
+    expect(parseState(renderState(state({ scope: 'abc' })))!.scope).toBe('abc');
+  });
+  it('rejects a state whose scope is not a string', () => {
+    const body = renderState(state()).replace(/ -->$/, '').replace(/}$/, ',"scope":1}') + ' -->';
+    expect(parseState(body)).toBeNull();
+  });
+});
+
 describe('toStored', () => {
   it('keeps only the fields a later run needs, truncating a huge quote', () => {
     const gated: GatedFinding = {
