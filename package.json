@@ -1,7 +1,14 @@
 {
-  "name": "detent",
-  "version": "0.2.1",
+  "name": "@ysilvestrov/detent",
+  "version": "0.3.0",
   "description": "Skills and small tools for software development with AI coding agents",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ysilvestrov/detent.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -20,7 +27,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "prepare": "npm run build",
+    "prepack": "npm run build",
     "gate": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
