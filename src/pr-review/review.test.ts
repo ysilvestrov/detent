@@ -364,6 +364,21 @@ describe('upsertReview', () => {
   });
 });
 
+// Windows without the symlink privilege cannot make a link (EPERM); CI on Linux can. Any other
+// error from the probe is a real failure and propagates.
+function probeSymlink(): boolean {
+  const probeDir = mkdtempSync(join(tmpdir(), 'detent-pr-review-probe-'));
+  writeFileSync(join(probeDir, 'target'), 'x');
+  try {
+    symlinkSync(join(probeDir, 'target'), join(probeDir, 'link'));
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'EPERM') return false;
+    throw e;
+  }
+}
+const canSymlink = probeSymlink();
+
 describe('readReviewableFile', () => {
   const dir = mkdtempSync(join(tmpdir(), 'detent-pr-review-symlink-'));
 
@@ -373,17 +388,11 @@ describe('readReviewableFile', () => {
     expect(readReviewableFile(p)).toBe('export const a = 1;\n');
   });
 
-  it('refuses to follow a symlink instead of shipping the target to the model', (ctx) => {
+  it.runIf(canSymlink)('refuses to follow a symlink instead of shipping the target to the model', () => {
     const secret = join(dir, 'secret.txt');
     writeFileSync(secret, 'SUPER_SECRET_TOKEN\n');
     const link = join(dir, 'leak.ts');
-    try {
-      symlinkSync(secret, link);
-    } catch (e) {
-      // Windows without the symlink privilege cannot make one; CI on Linux does.
-      if ((e as NodeJS.ErrnoException).code === 'EPERM') return ctx.skip();
-      throw e;
-    }
+    symlinkSync(secret, link);
     expect(readReviewableFile(link)).toBeNull();
   });
 

@@ -412,7 +412,7 @@ async function runReviewOnce(pr: PrContext, run: RunSettings, deps: ReviewDeps):
       : deps.listChangedFiles(decision.prSpec);
   if (decision.mode === 'incremental') {
     // A merge from the base keeps the stored head an ancestor, so stored..HEAD also
-    // carries what the base gained; review only what this PR itself changes (#742).
+    // carries what the base gained; review only what this PR itself changes (warsaw-beer-bot#742).
     const { inScope, mergedIn } = incrementalScope(sinceDiffSpec, prFiles);
     if (mergedIn.length > 0) {
       deps.log(

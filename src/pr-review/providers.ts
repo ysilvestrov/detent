@@ -25,6 +25,21 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     name: 'OpenAI',
     endpoint: 'https://api.openai.com/v1',
     keyEnv: 'OPENAI_API_KEY',
+    /*
+     * Chosen by replay measurement, never by preference. The protocol and every number behind
+     * these two strings are in warsaw-beer-bot docs/ai-review-model-evaluation.md.
+     *
+     * `find` -> gpt-5.6-sol (2026-09-22): a strict improvement on the gpt-5.5 it replaces, which
+     * is why it carried no quality bet - cheaper on both input ($4 vs $5 per 1M) and output ($20
+     * vs $30), while publishing 5 of the recall probe's 5 known defects plus several more, at 8
+     * and 6 verified per run against gpt-5.5's 5/5/3. Cheaper tiers were measured and declined:
+     * terra reaches 3-4 of the 5, luna only 2 and never raises the new-issue scope guard at all.
+     *
+     * `verify` stays gpt-5.5: it is the adversarial adjudicator, its prompts are small, and it is
+     * ~18% of the bill - there is no money in moving it and there is precision to lose. The
+     * 2026-07 finding that no asymmetric pairing measured better was about a WEAKER finder; a
+     * stronger, cheaper one is a different question, and this is its answer.
+     */
     defaultModels: { find: 'gpt-5.6-sol', verify: 'gpt-5.5' },
   },
   anthropic: {
