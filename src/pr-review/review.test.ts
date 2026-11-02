@@ -1161,6 +1161,45 @@ describe('runReview — incremental mode', () => {
     expect(gh.put.body).toContain('the fix did not close this');
   });
 
+  it('fails the run when a fresh finding cannot be verified, publishes nothing, and a healthy rerun publishes it', async () => {
+    const found = {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ findings: [FINDING] }) } }],
+        usage: { prompt_tokens: 10, completion_tokens: 1 },
+      }),
+    } as unknown as Response;
+    let n = 0;
+    const brokenVerifier = (async () => {
+      n += 1;
+      return n === 1 ? found : ({ ok: false, status: 400, text: async () => 'boom' } as unknown as Response);
+    }) as unknown as typeof fetch;
+    const writes: string[] = [];
+    const comments: string[] = [];
+    const githubFetchFailing = vi.fn(async (url: string, init?: RequestInit) => {
+      if (!init || init.method === undefined) return jsonResponse([]);
+      if (url.endsWith('/issues/7/comments')) comments.push(JSON.parse(init.body as string).body as string);
+      else writes.push(url);
+      return jsonResponse({ id: 1 });
+    }) as unknown as typeof fetch;
+
+    await expect(runReview(PR, RUN, deps({ openaiFetch: brokenVerifier, githubFetch: githubFetchFailing }))).rejects.toThrow(
+      '1 finding(s) could not be verified',
+    );
+    expect(writes).toEqual([]);
+    expect(comments).toHaveLength(1);
+    expect(comments[0]).toContain('1 finding(s) could not be verified');
+
+    const ai = openaiFetch([
+      JSON.stringify({ findings: [FINDING] }),
+      JSON.stringify({ verdicts: [{ index: 1, verdict: 'confirmed', evidence: 'line 2 returns not_found' }] }),
+    ]);
+    const gh = githubFetch(null);
+    await runReview(PR, RUN, deps({ openaiFetch: ai.fetchFn, githubFetch: gh.fetchFn }));
+    expect(gh.put.body).toContain('merge reported as failure');
+  });
+
   it('keeps a re-checked finding open when its verification errors, unlike a fresh one', async () => {
     const ai = {
       calls: [] as string[],
@@ -1217,7 +1256,8 @@ describe('runReview — incremental mode', () => {
 
     const state = parseStateFromBody(gh.put.body!);
     expect(state.spend.runs).toBe(2);
-    expect(state.spend.usd).toBeGreaterThan(0.1);
+    // previous $0.10 + one gpt-5.5 call: 1000 in x $5/M + 100 out x $30/M = $0.008
+    expect(state.spend.usd).toBeCloseTo(0.108, 6);
   });
 });
 

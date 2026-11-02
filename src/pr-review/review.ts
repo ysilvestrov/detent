@@ -564,6 +564,14 @@ async function runReviewOnce(pr: PrContext, run: RunSettings, deps: ReviewDeps):
     }
   }
 
+  // A fresh finding whose verifier call failed was never checked. Publishing
+  // 'no findings' with the head advanced would make a rerun skip it for good, so
+  // fail the run: the stored head stays put and the rerun verifies again.
+  const unverified = verified.results.filter((r) => freshById.has(r.id) && r.verdict === 'error').length;
+  if (unverified > 0) {
+    throw new Error(`${unverified} finding(s) could not be verified; the run failed so a rerun checks them again.`);
+  }
+
   const runUsage = addUsage(findUsage, verified.usage);
   const findUsd = costUsd(run.findModel, findUsage);
   const verifyUsd = costUsd(run.verifyModel, verified.usage);

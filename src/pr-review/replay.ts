@@ -231,7 +231,7 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
   });
   io.err(`replaying ${mergeBase}..${head}`);
 
-  const changed = git(['diff', '--name-only', `${mergeBase}..${head}`])
+  const changed = git(['-c', 'core.quotePath=off', 'diff', '--name-only', `${mergeBase}..${head}`])
     .split('\n')
     .map((s) => s.trim())
     .filter(Boolean);
@@ -241,7 +241,7 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
     return EXIT.ok;
   }
 
-  const diff = git(['diff', `${mergeBase}..${head}`, '--', ...reviewable]);
+  const diff = git(['-c', 'core.quotePath=off', 'diff', `${mergeBase}..${head}`, '--', ...reviewable]);
   const readFile = (path: string): string | null => {
     try {
       return git(['show', `${head}:${path}`]);

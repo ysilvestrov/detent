@@ -155,11 +155,11 @@ export async function prReview(argv: readonly string[], io: PrReviewIo): Promise
     hasCommit: (sha) => gitOk(cwd, ['cat-file', '-e', `${sha}^{commit}`]),
     isAncestor: (a, b) => gitOk(cwd, ['merge-base', '--is-ancestor', a, b]),
     listChangedFiles: (diffSpec) =>
-      gitText(cwd, ['diff', '--name-only', diffSpec])
+      gitText(cwd, ['-c', 'core.quotePath=off', 'diff', '--name-only', diffSpec])
         .split('\n')
         .map((s) => s.trim())
         .filter(Boolean),
-    getDiff: (diffSpec, files) => gitText(cwd, ['diff', diffSpec, '--', ...files]),
+    getDiff: (diffSpec, files) => gitText(cwd, ['-c', 'core.quotePath=off', 'diff', diffSpec, '--', ...files]),
     readFile: (path) => readReviewableFile(path, cwd),
     log: (message) => io.out(message),
     openaiFetch: io.fetchFn,

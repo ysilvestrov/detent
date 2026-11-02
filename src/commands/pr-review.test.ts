@@ -267,3 +267,48 @@ describe('pr-review --replay', () => {
     expect(h.calls).toEqual([]);
   });
 });
+
+describe('non-ASCII paths', () => {
+  const NAME = 'src/файл-é.ts';
+  const finding = {
+    file: NAME,
+    start_line: 1,
+    end_line: 1,
+    quote: 'export const z = 9;',
+    claim: 'CLAIM_CYRILLIC z is never used',
+    why_it_breaks: 'dead export',
+    severity: 'P2',
+    confidence: 'high',
+  };
+  const answers = () => [
+    ok({ choices: [{ message: { content: JSON.stringify({ findings: [finding] }) } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }),
+    ok({
+      choices: [{ message: { content: JSON.stringify({ verdicts: [{ index: 1, verdict: 'confirmed', evidence: 'z is exported and unused' }] }) } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5 },
+    }),
+  ];
+
+  it('reviews a file with a Cyrillic name in --replay: it is listed, diffed under its real name and its finding survives the gate', async () => {
+    const queue = answers();
+    const h = harness({ env: { GITHUB_EVENT_NAME: '', GITHUB_EVENT_PATH: '', GITHUB_TOKEN: '' }, model: () => queue.shift()! });
+    put(h.dir, NAME, 'export const z = 9;\n');
+    git(h.dir, 'add', '-A');
+    git(h.dir, 'commit', '-q', '-m', 'cyrillic');
+    const head = git(h.dir, 'rev-parse', 'HEAD');
+    h.io.gh = () => JSON.stringify({ title: 'A change', body: null, headRefOid: head, baseRefName: 'main' });
+
+    expect(await prReview(['--replay', '7'], h.io)).toBe(EXIT.ok);
+    expect(modelCalls(h.calls)[0]!.body).toContain(`+++ b/${NAME}`);
+    expect(h.out.join('\n')).toContain('CLAIM_CYRILLIC z is never used');
+  });
+
+  it('reviews a file with a Cyrillic name in CI: the diff sent to the model names it', async () => {
+    const h = harness();
+    put(h.dir, NAME, 'export const z = 9;\n');
+    git(h.dir, 'add', '-A');
+    git(h.dir, 'commit', '-q', '-m', 'cyrillic');
+
+    expect(await prReview([], h.io)).toBe(EXIT.ok);
+    expect(modelCalls(h.calls)[0]!.body).toContain(`+++ b/${NAME}`);
+  });
+});
