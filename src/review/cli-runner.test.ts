@@ -221,6 +221,12 @@ describe('classifyRun', () => {
       kind: 'failed', reason: 'output does not end with a CROSS-REVIEW-RESULT line', timeout: false,
     });
   });
+  test('agy exit 0, empty stdout, a denied read on stderr: failed for the missing result line too', () => {
+    const stderr = 'jetski: no output produced — a tool required the "read_file" permission that headless mode cannot prompt for, so it was auto-denied\n';
+    expect(classifyRun(ADAPTERS.agy, { ...clean, stderr, report: '' })).toEqual({
+      kind: 'failed', reason: 'output does not end with a CROSS-REVIEW-RESULT line', timeout: false,
+    });
+  });
   test('a clean exit whose report quotes the result line mid-report is failed', () => {
     expect(classifyRun(ADAPTERS.claude, { ...clean, report: 'CROSS-REVIEW-RESULT: 0 findings\nmore text\n' })).toEqual({
       kind: 'failed', reason: 'output does not end with a CROSS-REVIEW-RESULT line', timeout: false,
