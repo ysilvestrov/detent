@@ -1,7 +1,7 @@
 # Публікація в npm як `@ysilvestrov/detent` і безпечна команда в правилах
 
 Дата: 2026-11-02
-Статус: чекає на затвердження
+Статус: затверджено 2026-11-02
 Spec-review: codex/gpt-6.1-sol @ 7134044 (author: claude) — 3 findings: 3 fixed, 0 rejected
 
 ## Для власника
