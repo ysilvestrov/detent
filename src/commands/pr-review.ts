@@ -1,6 +1,6 @@
 // `detent pr-review` (spec 2026-11-02-pr-review-design.md, «Команда»). The checks run in the order of the
 // plan: arguments, the event and the token, the settings of the base branch, the provider, the models.
-// Only after all of them does the review run, and only a review can give exit 5.
+// Only after all of them does the review run. Exit 5 comes from a failed review, or from a missing key outside a fork.
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolveReplayArgs, runReplay, EXIT, type ReplayIo } from '../pr-review/replay.js';
@@ -172,6 +172,7 @@ export async function prReview(argv: readonly string[], io: PrReviewIo): Promise
   } catch (error) {
     // The comment about the failure has been posted by runReview; here only the log and the code.
     const message = messageOf(error).replaceAll(apiKey, '***').replaceAll(githubToken, '***');
-    return fail(EXIT.failed, `AI review failed: ${message}`);
+    io.err(`::error::AI review failed: ${message}`);
+    return EXIT.failed;
   }
 }
