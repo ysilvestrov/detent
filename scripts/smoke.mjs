@@ -23,12 +23,13 @@ function fail(message, result) {
   process.exit(1);
 }
 
-// `npm` and `npx` are .cmd files on Windows, which need a shell; the arguments here are fixed and
-// contain no spaces. Node deprecates a shell with an argument list, hence one command line there.
+// `npm` and `npx` are .cmd files on Windows, which need a shell. Node deprecates a shell with an
+// argument list, hence one command line there; the only argument with a space can be a temp path.
 function run(command, args, cwd, env = process.env) {
   const options = { cwd, env, encoding: 'utf8' };
+  const quoted = args.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg));
   const result = process.platform === 'win32'
-    ? spawnSync([command, ...args].join(' '), { ...options, shell: true })
+    ? spawnSync([command, ...quoted].join(' '), { ...options, shell: true })
     : spawnSync(command, args, options);
   if (result.error) fail(`${command} ${args.join(' ')}: ${result.error.message}`);
   return result;
@@ -72,7 +73,6 @@ const archive = readdirSync(pack).find((name) => name.endsWith('.tgz'));
 if (archive === undefined) fail('npm pack produced no archive');
 
 writeFileSync(join(consumer, 'package.json'), '{"private":true}\n');
-// A relative path: through the shell on Windows an absolute one could contain a space.
 step('npm', ['install', `../pack/${archive}`, '--no-audit', '--no-fund', '--silent'], consumer);
 // `install` needs a repository, and this one is the nearest whatever the temp folder lies in.
 step('git', ['init', '-q'], consumer);
