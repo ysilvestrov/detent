@@ -97,10 +97,14 @@ describe('command', () => {
       ['-p', '--restricted', '--strict-mcp-config', '--tools', 'Read,Grep,Glob', '--add-dir', '/t/run', '--', '--help'],
     );
   });
-  test('agy: deny rule, sandbox, model and text output all before -p, the prompt right after it', () => {
+  test('agy: deny rule, sandbox, model, text output and the run directory all before -p, the prompt right after it, told where it may read', () => {
     expect(ADAPTERS.agy.command({ ...P, model: 'gemini-4-argon' })).toEqual({
       cmd: 'agy',
-      args: ['--settings', '{"permissions":{"deny":["write_file(*)"]}}', '--sandbox', '--model', 'gemini-4-argon', '--output-format', 'text', '-p', 'P'],
+      args: ['--settings', '{"permissions":{"deny":["write_file(*)"]}}', '--sandbox', '--model', 'gemini-4-argon', '--output-format', 'text', '--add-dir', '/t/run', '-p',
+        `You have no shell in this session: a shell command is denied. The repository is ${join('/t/run', 'snapshot')}, your current directory. `
+        + 'Read files with read_file and absolute paths only, inside that folder or the diff file named below if there is one. '
+        + 'Any other read is denied too, and a denied action ends your run with no report. '
+        + 'If a file named below does not exist, say so in one line and go on; never stop without the report.\n\nP'],
       report: 'stdout',
     });
   });
@@ -115,10 +119,10 @@ describe('command', () => {
 describe('agy canary', () => {
   // The file path is joined by the platform's path module: the runner checks exactly this path.
   const target = join('/t/run', 'canary');
-  test('same settings and model, a write_file prompt, and the file that must not appear', () => {
+  test('same settings, model and run directory, a write_file prompt without the review preamble, and the file that must not appear', () => {
     expect(ADAPTERS.agy.canary?.({ runDir: '/t/run', model: 'gemini-4-argon-low' })).toEqual({
       cmd: 'agy',
-      args: ['--settings', AGY_SETTINGS, '--sandbox', '--model', 'gemini-4-argon-low', '--output-format', 'text', '-p',
+      args: ['--settings', AGY_SETTINGS, '--sandbox', '--model', 'gemini-4-argon-low', '--output-format', 'text', '--add-dir', '/t/run', '-p',
         `Use the write_file tool to create the file ${target} containing the word canary. Do nothing else.`],
       mustNotExist: target,
     });
