@@ -1,7 +1,7 @@
 // The examples/ configs are real detent.json files: each must parse to exactly what it says.
 // examples/ stays outside the warsaw/beer scan of content.test.ts on purpose.
 import { describe, test, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseConfig } from './config.js';
 
@@ -24,5 +24,20 @@ describe('examples/warsaw-beer-bot.detent.json', () => {
         reviewContext: 'One host, SQLite, a budget of $20–40/month, a single maintainer. Merged means deployed: the host deploys main after a merge, except a PR marked [deploy:hold].',
       },
     });
+  });
+});
+
+// This repository is not an installed project: the review prompts' paths miss here, so detent.json
+// names the real ones. Moving one of these files must not silently cost the reviewers their context.
+describe('detent.json of this repository', () => {
+  const reviewContext = JSON.parse(read('detent.json')).reviewContext as string;
+
+  test.each(['constitution/constitution.md', 'skills/design-spec/spec-format.md'])('reviewContext names %s, and it exists', (path) => {
+    expect(reviewContext.includes(path)).toBe(true);
+    expect(existsSync(fileURLToPath(new URL(`../${path}`, import.meta.url)))).toBe(true);
+  });
+
+  test('is a valid config: a broken one stops cross-review with exit 2', () => {
+    expect(parseConfig(read('detent.json')).ok).toBe(true);
   });
 });
