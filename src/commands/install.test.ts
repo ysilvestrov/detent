@@ -370,7 +370,7 @@ describe('install: errors (exit 2, nothing written)', () => {
   test('a bad argument', () => {
     const s = setup();
     expect(s.run(['--superpowers', 'maybe'])).toBe(2);
-    expect(s.err()).toEqual(['install: unknown --superpowers value "maybe" (expected yes|no)\nUsage: detent install [--claude] [--agents] [--dry-run] [--superpowers yes|no]']);
+    expect(s.err()).toEqual(['install: unknown --superpowers value "maybe" (expected yes|no)\nUsage: npx -y @ysilvestrov/detent install [--claude] [--agents] [--dry-run] [--superpowers yes|no]']);
     expect(s.tree()).toEqual([]);
   }, E2E_TIMEOUT);
 });

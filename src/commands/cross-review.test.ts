@@ -142,7 +142,7 @@ describe('crossReview: refusals before any reviewer runs', () => {
     expect(s.run(['--base', 'main'])).toBe(2);
     expect(s.err).toEqual([
       'cross-review: --author claude|codex|agy (or DETENT_AUTHOR) is required: the author cannot be detected\n'
-      + 'Usage: detent cross-review --author claude|codex|agy [--reviewer <id>] [--base <ref> | --spec <file>] [--model <id>]',
+      + 'Usage: npx -y @ysilvestrov/detent cross-review --author claude|codex|agy [--reviewer <id>] [--base <ref> | --spec <file>] [--model <id>]',
     ]);
   }, E2E_TIMEOUT);
 

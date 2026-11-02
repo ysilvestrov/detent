@@ -14,7 +14,7 @@ import { runAttempt, runChain, type AttemptContext } from '../review/cli-runner.
 
 export const EXIT = { ok: 0, usage: 2, nested: 3, reviewerFailed: 5 } as const;
 
-export const USAGE = 'Usage: detent cross-review --author claude|codex|agy [--reviewer <id>] [--base <ref> | --spec <file>] [--model <id>]';
+export const USAGE = 'Usage: npx -y @ysilvestrov/detent cross-review --author claude|codex|agy [--reviewer <id>] [--base <ref> | --spec <file>] [--model <id>]';
 
 type Env = Readonly<Record<string, string | undefined>>;
 

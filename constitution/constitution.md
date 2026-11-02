@@ -37,8 +37,8 @@ at the repository root; read their values there.
    - Do not compute the expected value by repeating production logic in the test.
 
 6. **The reviewer is not the author.** Before a PR, and before a spec goes to the owner, a model
-   of another family reviews it through `npx -y @ysilvestrov/detent cross-review`. The protocol is in the
-   `detent-cross-review` skill.
+   of another family reviews it through `npx -y @ysilvestrov/detent cross-review`. The protocol is
+   in the `detent-cross-review` skill.
 
 7. **Superpowers overrides** (apply only when Superpowers is installed). They name behaviour, not
    branch names inside those skills, because branch names change between releases. These

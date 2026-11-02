@@ -7,7 +7,7 @@ import { crossReview, USAGE as CROSS_REVIEW_USAGE } from './commands/cross-revie
 import { install, USAGE as INSTALL_USAGE } from './commands/install.js';
 import { TIMEOUT_MS } from './review/cli-runner.js';
 
-const USAGE = `Usage: detent <command>
+const USAGE = `Usage: npx -y @ysilvestrov/detent <command>
 
 Commands:
   cross-review   review the branch or a spec by a reviewer of another model family
