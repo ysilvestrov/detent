@@ -1,7 +1,7 @@
 # AI-рев'ю PR у GitHub як частина detent
 
 Дата: 2026-11-02
-Статус: чекає на затвердження
+Статус: затверджено 2026-11-02
 Spec-review: codex/gpt-6.1-sol @ 29c5a51 (author: claude) — 7 findings: 7 fixed, 0 rejected
 
 ## Для власника
