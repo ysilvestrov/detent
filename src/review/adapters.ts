@@ -1,6 +1,7 @@
 // Reviewer adapters: how each CLI is told to review read-only, and how it reports a fatal error
 // (spec, «Адаптер рецензента»). Pure: the runner spawns what `command` and `canary` return.
 import { join } from 'node:path';
+import { runArtifacts } from './preflight.js';
 
 export type ReviewerId = 'claude' | 'codex' | 'agy';
 export type Family = 'anthropic' | 'openai' | 'google';
@@ -29,8 +30,19 @@ export interface ReviewerAdapter {
 const AGY_SETTINGS = '{"permissions":{"deny":["write_file(*)"]}}';
 
 // Every agy flag goes before -p: -p takes the very next argument as its prompt (probe П-А3).
-function agyArgs(model: string, prompt: string): string[] {
-  return ['--settings', AGY_SETTINGS, '--sandbox', '--model', model, '--output-format', 'text', '-p', prompt];
+// --add-dir lets it read the diff, which lies outside the snapshot (issue #6, probe П-2).
+function agyArgs(model: string, runDir: string, prompt: string): string[] {
+  return ['--settings', AGY_SETTINGS, '--sandbox', '--model', model, '--output-format', 'text', '--add-dir', runDir, '-p', prompt];
+}
+
+// In headless mode a denied shell command or read ends agy's turn with an empty answer: exit 0, no
+// report (probes П-1, П-3). Telling it first keeps read-only as it is, with no allow rule. The
+// canary does not get this: it must reach write_file.
+function agyReviewPreamble(runDir: string): string {
+  return `You have no shell in this session: a shell command is denied. The repository is ${runArtifacts(runDir).snapshot}, your current directory. `
+    + 'Read files with read_file and absolute paths only, inside that folder or the diff file named below if there is one. '
+    + 'Any other read is denied too, and a denied action ends your run with no report. '
+    + 'If a file named below does not exist, say so in one line and go on; never stop without the report.\n\n';
 }
 
 const codex: ReviewerAdapter = {
@@ -71,12 +83,12 @@ const agy: ReviewerAdapter = {
   command: (p) => {
     // Selection never lets this happen: without an explicit model agy's family cannot be proved.
     if (!p.model) throw new Error('agy needs an explicit model: its CLI default is unknown, so its family cannot be proved');
-    return { cmd: 'agy', args: agyArgs(p.model, p.prompt), report: 'stdout' };
+    return { cmd: 'agy', args: agyArgs(p.model, p.runDir, agyReviewPreamble(p.runDir) + p.prompt), report: 'stdout' };
   },
   canary: (p) => {
     const target = join(p.runDir, 'canary');
     const prompt = `Use the write_file tool to create the file ${target} containing the word canary. Do nothing else.`;
-    return { cmd: 'agy', args: agyArgs(p.model, prompt), mustNotExist: target };
+    return { cmd: 'agy', args: agyArgs(p.model, p.runDir, prompt), mustNotExist: target };
   },
   // The first line: after its error agy prints the list of available models (probe П-Б2).
   errorLine: { stream: 'stderr', prefix: 'error:', which: 'first' },
