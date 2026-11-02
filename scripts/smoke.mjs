@@ -23,13 +23,13 @@ function fail(message, result) {
   process.exit(1);
 }
 
-// `npm` and `npx` are .cmd files on Windows, which need a shell. Node deprecates a shell with an
-// argument list, hence one command line there; the only argument with a space can be a temp path.
+// `npm` and the `detent` shim are .cmd files on Windows, which need a shell. Node deprecates a shell
+// with an argument list, hence one command line there. A temp path can hold spaces or `&`.
 function run(command, args, cwd, env = process.env) {
   const options = { cwd, env, encoding: 'utf8' };
-  const quoted = args.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg));
+  const quote = (arg) => (/^[\w./:\\=-]+$/.test(arg) ? arg : `"${arg}"`);
   const result = process.platform === 'win32'
-    ? spawnSync([command, ...quoted].join(' '), { ...options, shell: true })
+    ? spawnSync([command, ...args].map(quote).join(' '), { ...options, shell: true })
     : spawnSync(command, args, options);
   if (result.error) fail(`${command} ${args.join(' ')}: ${result.error.message}`);
   return result;
@@ -46,9 +46,12 @@ const detentEnv = { ...process.env, HOME: home, USERPROFILE: home };
 delete detentEnv.DETENT_AUTHOR;
 delete detentEnv.CROSS_REVIEW_ACTIVE;
 
+// The local shim itself: `npx` would fall back to a global detent if the package lost its `bin`.
+const shim = join(consumer, 'node_modules', '.bin', process.platform === 'win32' ? 'detent.cmd' : 'detent');
+
 function detent(args, { code, stdout, stderr }) {
   const name = `detent ${args.join(' ')}`;
-  const result = run('npx', ['--no-install', 'detent', ...args], consumer, detentEnv);
+  const result = run(shim, args, consumer, detentEnv);
   if (result.status !== code) fail(`${name}: expected exit code ${code}`, result);
   if (stdout !== undefined && !stdout(result.stdout)) fail(`${name}: unexpected stdout`, result);
   if (stderr !== undefined && !stderr(result.stderr)) fail(`${name}: unexpected stderr`, result);
