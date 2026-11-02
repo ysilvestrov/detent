@@ -12,7 +12,7 @@ import { install } from './install.js';
 
 const E2E_TIMEOUT = 60_000;
 
-const BEGIN = '<!-- detent:constitution v1 begin — edit outside these markers; `npx detent install` rewrites this block -->';
+const BEGIN = '<!-- detent:constitution v1 begin — edit outside these markers; `npx -y @ysilvestrov/detent install` rewrites this block -->';
 const END = '<!-- detent:constitution end -->';
 const DEV = 'Without Superpowers, start any behaviour change with `detent-dev-cycle`';
 const CLAUDE_AUTHOR = 'You are Claude: pass --author claude.';
@@ -167,6 +167,27 @@ describe('install: again', () => {
     expect(s.run([])).toBe(0);
     expect(s.snapshot()).toEqual(before);
     expect(s.out()).toEqual([...PLAN_ORDER.map((p) => `unchanged ${p}`), ...NO_SUPERPOWERS]);
+  }, E2E_TIMEOUT);
+
+  test('a block the previous version wrote (old marker, old command, its manifest record): rewritten, the text outside stays', () => {
+    const s = setup();
+    const head = '# Acme\n\nOur own rules.\n';
+    const tail = '\n## After the block\nStill ours.\n';
+    s.putRepo('CLAUDE.md', head);
+    expect(s.run(['--claude'])).toBe(0);
+    // What the previous version wrote: the old command in the marker and in the constitution text,
+    // and the manifest record, a hash of that inner text.
+    const OLD = (text: string) => text.replaceAll('npx -y @ysilvestrov/detent', 'npx detent');
+    const oldInner = OLD(INNER_DEV);
+    expect(oldInner).not.toBe(INNER_DEV);
+    s.putRepo('CLAUDE.md', `${head}\n${OLD(BEGIN)}\n${oldInner}${END}\n${tail}`);
+    const manifest = JSON.parse(s.read('.detent/manifest.json')) as { blocks: Record<string, { sha256: string; version: string }> };
+    manifest.blocks['CLAUDE.md'] = { sha256: sha(oldInner), version: '0.2.0' };
+    s.putRepo('.detent/manifest.json', `${JSON.stringify(manifest, null, 2)}\n`);
+
+    expect(s.run(['--claude'])).toBe(0);
+    expect(s.read('CLAUDE.md')).toBe(`${head}\n${BLOCK_DEV}${tail}`);
+    expect(s.out()).toContain('update    CLAUDE.md');
   }, E2E_TIMEOUT);
 
   test('a skill edited by hand: exit 4, the list, and every file byte-identical (an outdated .gitignore not appended)', () => {

@@ -1,7 +1,7 @@
 // The constitution block in CLAUDE.md / AGENTS.md and the author line of `detent-cross-review`
 // (spec, «Шаблон конституції», «Установка»). Pure text in, text out.
 
-export const BLOCK_BEGIN = '<!-- detent:constitution v1 begin — edit outside these markers; `npx detent install` rewrites this block -->';
+export const BLOCK_BEGIN = '<!-- detent:constitution v1 begin — edit outside these markers; `npx -y @ysilvestrov/detent install` rewrites this block -->';
 export const BLOCK_END = '<!-- detent:constitution end -->';
 
 // Added as the last line inside the block only for a target where Superpowers is not seen

@@ -4,7 +4,7 @@ import {
   appendBlock, blockInner, findBlock, renderBlock, replaceAuthorLine, replaceBlock,
 } from './blocks.js';
 
-const B = '<!-- detent:constitution v1 begin — edit outside these markers; `npx detent install` rewrites this block -->';
+const B = '<!-- detent:constitution v1 begin — edit outside these markers; `npx -y @ysilvestrov/detent install` rewrites this block -->';
 const E = '<!-- detent:constitution end -->';
 
 describe('marker and line texts', () => {
