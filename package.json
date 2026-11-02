@@ -28,7 +28,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "prepack": "npm run build",
-    "gate": "npm run typecheck && npm test && npm run build"
+    "gate": "npm run typecheck && npm test && npm run build",
+    "smoke": "node scripts/smoke.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
