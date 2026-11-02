@@ -1,5 +1,6 @@
 // The review itself: which files, the find and verify passes, what is published and what is carried.
 import { lstatSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { buildReviewContext } from './context.js';
 import { runFind } from './find.js';
 import { applyGate, changedLineRanges, findingKey } from './gate.js';
@@ -288,7 +289,7 @@ function failureCommentBody(message: string, headSha: string): string {
   ].join('\n');
 }
 
-async function postFailureComment(
+export async function postFailureComment(
   deps: GithubDeps,
   message: string,
   headSha: string,
@@ -336,10 +337,11 @@ async function postFailureComment(
  * contents shipped to the model as "the changed file". We want the blob the PR
  * actually adds, never what it points at.
  */
-export function readReviewableFile(path: string): string | null {
+export function readReviewableFile(path: string, root = '.'): string | null {
   try {
-    if (!lstatSync(path).isFile()) return null;
-    return readFileSync(path, 'utf8');
+    const full = resolve(root, path);
+    if (!lstatSync(full).isFile()) return null;
+    return readFileSync(full, 'utf8');
   } catch {
     return null;
   }

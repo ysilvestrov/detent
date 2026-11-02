@@ -177,3 +177,13 @@ describe('baseReader', () => {
     expect(loadSettings(read, readDefault).patterns).toEqual(DEFAULT_PATTERNS);
   });
 });
+
+describe('loadSettings with the prompts of the package', () => {
+  it('reads the shipped find and verify prompts and leaves no placeholder in them', () => {
+    const s = loadSettings(files({}));
+    expect(s.findPrompt).toContain('Project context: none stated');
+    expect(s.findPrompt).not.toContain('{{');
+    expect(s.verifyPrompt).toContain('verification pass');
+    expect(s.verifyPrompt).not.toContain('{{');
+  });
+});

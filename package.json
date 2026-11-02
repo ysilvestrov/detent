@@ -14,6 +14,10 @@
   "bin": {
     "detent": "dist/cli.js"
   },
+  "exports": {
+    "./pr-review": "./dist/pr-review/index.js",
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist",
     "prompts",
