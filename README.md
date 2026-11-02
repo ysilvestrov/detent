@@ -46,15 +46,15 @@ Release 2 is planned to add AI PR review in GitHub as a reusable Action. Design 
 
 ## Install
 
-Release 1 is installed from git only; there is no npm package.
+detent is published on npm as `@ysilvestrov/detent`. The bare name `detent` on npm is not ours:
+never run `npx detent`, always use the scoped name. The binary is still called `detent`.
 
 ```
-npm i -D github:ysilvestrov/detent#v0.2.1
-npx detent install [--claude] [--agents] [--dry-run] [--superpowers yes|no]
+npm i -D @ysilvestrov/detent
+npx -y @ysilvestrov/detent install [--claude] [--agents] [--dry-run] [--superpowers yes|no]
 ```
 
-npm builds `dist/` with the package's `prepare` script when it installs the git dependency.
-One-off, without adding the dependency: `npx github:ysilvestrov/detent#v0.2.1 install`.
+One-off, without adding the dependency: `npx -y @ysilvestrov/detent install`.
 
 Run it inside a git repository: the project root is `git rev-parse --show-toplevel`. Without a
 target flag both targets are installed.
@@ -80,7 +80,7 @@ What install writes, and its rules:
 - **Nothing is ever deleted.** A skill the new version no longer ships stays on disk; install
   prints `<path>: stale, delete with a script if not needed`.
 - **The constitution block** sits between
-  ``<!-- detent:constitution v1 begin — edit outside these markers; `npx detent install` rewrites this block -->``
+  ``<!-- detent:constitution v1 begin — edit outside these markers; `npx -y @ysilvestrov/detent install` rewrites this block -->``
   and `<!-- detent:constitution end -->`. Only the text between them is replaced; your text
   outside them is kept byte for byte. No markers: the block is appended at the end of the file.
   A broken pair (one marker, or several): exit 4, nothing written.
@@ -117,10 +117,21 @@ In Claude Code the plugin's skills are called `/detent:detent-<name>`, for examp
 `/detent:detent-design-spec`: the plugin name, then the skill's frontmatter `name`.
 
 The plugin gives Claude Code the skills only. It does not install the constitution block: run
-`npx detent install --claude` for that. The plugin and the copied skills together give each skill
+`npx -y @ysilvestrov/detent install --claude` for that. The plugin and the copied skills together give each skill
 twice (the plugin's `/detent:detent-<name>` and `detent-<name>` from `.claude/skills/`); install
 warns when it sees the detent plugin enabled in the project's `.claude/settings.json`. Nothing
 reaches Codex or Antigravity through the plugin.
+
+### Moving from the git install
+
+Earlier releases were installed from git (`github:ysilvestrov/detent#…`). To switch:
+
+1. Replace the dependency first: `npm rm detent`, then `npm i -D @ysilvestrov/detent`. On npm 12,
+   `npm ci` fails with `EALLOWGIT` while the git dependency is still in the lock file, so do this
+   before anything else.
+2. Run `npx -y @ysilvestrov/detent install`. A block that install rewrites needs no manual action.
+3. A changed block, or a block with no manifest entry that differs from what install would write,
+   is a conflict: install writes nothing and exits 4. Fix it by hand (see the rules above).
 
 ## `detent.json`
 
@@ -147,7 +158,7 @@ error. An example for a real project:
 ## `detent cross-review`
 
 ```
-npx detent cross-review --author claude|codex|agy [--reviewer <id>] [--base <ref> | --spec <file>] [--model <id>]
+npx -y @ysilvestrov/detent cross-review --author claude|codex|agy [--reviewer <id>] [--base <ref> | --spec <file>] [--model <id>]
 ```
 
 - `--author` is required (or `DETENT_AUTHOR`): the author cannot be detected from the
@@ -283,10 +294,18 @@ What release 1 has and has not proved, from the spec's claim → evidence table 
   author's self-report.
 - **`agy` read-only** is proved for `write_file`/`edit_file` only, and only while `agy` keeps the
   rule's syntax; the canary catches a change, MCP tools stay uncovered.
-- **npm** 11.19+ prints an `install-scripts … not yet covered by allowScripts` warning for
-  detent's `prepare` script. The build still runs; if npm makes this blocking, `dist/` will have to
-  be committed into the release tag.
-- **Install from git** was tried with `npm i -D` on Windows and WSL. The lock file records the
-  dependency as `git+ssh://git@github.com/…`; a machine without an SSH key for GitHub has not been
-  tried. The one-off `npx -y github:ysilvestrov/detent#v0.1.0 --version` printed `0.1.0` on both.
+- **The plugin's skills** are updated with the Claude Code plugin, not by `install`. `install`
+  updates only the copies in `.claude/skills/` and `.agents/skills/`.
 - The `codex` reviewer has not been run on Windows.
+
+## Releasing (for the owner)
+
+1. Merge to `main`, then tag `v<version>` (the version in `package.json`) on the merged commit.
+2. Make a clean checkout of the tag and run `npm ci`.
+3. Run `npm publish` and enter the 2FA code. `publishConfig.access` is already `public`, and
+   `prepack` builds `dist/`.
+4. Check the registry: `npm view @ysilvestrov/detent version dist.shasum`. The shasum must equal
+   the one `npm pack --dry-run` prints for the same checkout.
+5. Check the install on npm 11 and on npm 12, in an empty folder and in a folder that has the
+   dependency. Include `install` in a clean git repository without a `package.json`.
+6. Update the Claude plugin to the new version.
