@@ -78,3 +78,12 @@ describe('isReviewState', () => {
     expect(isReviewState(null)).toBe(false);
   });
 });
+
+describe('isFindings: required fields', () => {
+  it('rejects a payload without a findings key', () => {
+    expect(isFindings({})).toBe(false);
+  });
+  it('rejects a non-string quote', () => {
+    expect(isFindings({ findings: [{ ...finding, quote: 5 }] })).toBe(false);
+  });
+});

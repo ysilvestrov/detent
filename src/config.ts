@@ -1,6 +1,17 @@
 // detent.json: the project config (spec, «Конфіг проєкту»). Pure: the caller reads the file and
 // passes its text, or null when there is none.
 import { REVIEWER_IDS, isReviewerId, type ReviewerId } from './review/adapters.js';
+import { PROVIDER_IDS, isProviderId, type ProviderId } from './pr-review/providers.js';
+
+export interface PrReviewConfig {
+  provider?: ProviderId;
+  include?: string[];
+  ignore?: string[];
+  bodyExclude?: string[];
+  bodyInclude?: string[];
+  findModel?: string;
+  verifyModel?: string;
+}
 
 export interface Config {
   language: string;
@@ -13,6 +24,7 @@ export interface Config {
   reviewers: ReviewerId[];
   models: Partial<Record<ReviewerId, string>>;
   reviewContext?: string;
+  prReview?: PrReviewConfig;
 }
 
 export const DEFAULT_CONFIG: Readonly<Config> = Object.freeze({
@@ -32,6 +44,42 @@ const EXPECTED_IDS = REVIEWER_IDS.join('|');
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+const PR_REVIEW_LIST_KEYS = ['include', 'ignore', 'bodyExclude', 'bodyInclude'] as const;
+const PR_REVIEW_MODEL_KEYS = ['findModel', 'verifyModel'] as const;
+const PR_REVIEW_KEYS: readonly string[] = ['provider', ...PR_REVIEW_LIST_KEYS, ...PR_REVIEW_MODEL_KEYS];
+
+function parsePrReview(v: unknown): { ok: true; value: PrReviewConfig } | { ok: false; error: string } {
+  if (!isPlainObject(v)) return { ok: false, error: 'detent.json: "prReview" must be an object' };
+  for (const key of Object.keys(v)) {
+    if (!PR_REVIEW_KEYS.includes(key)) return { ok: false, error: `detent.json: unknown key "${key}" in "prReview"` };
+  }
+  const out: PrReviewConfig = {};
+  if (Object.hasOwn(v, 'provider')) {
+    const p = v.provider;
+    if (typeof p !== 'string' || !isProviderId(p)) {
+      return { ok: false, error: `detent.json: "prReview.provider" must be one of ${PROVIDER_IDS.join('|')}` };
+    }
+    out.provider = p;
+  }
+  for (const key of PR_REVIEW_LIST_KEYS) {
+    if (!Object.hasOwn(v, key)) continue;
+    const list = v[key];
+    if (!Array.isArray(list) || !list.every((x) => typeof x === 'string')) {
+      return { ok: false, error: `detent.json: "prReview.${key}" must be an array of strings` };
+    }
+    out[key] = [...(list as string[])];
+  }
+  for (const key of PR_REVIEW_MODEL_KEYS) {
+    if (!Object.hasOwn(v, key)) continue;
+    const m = v[key];
+    if (typeof m !== 'string' || m === '') {
+      return { ok: false, error: `detent.json: "prReview.${key}" must be a non-empty string` };
+    }
+    out[key] = m;
+  }
+  return { ok: true, value: out };
 }
 
 function defaults(): Config {
@@ -88,6 +136,12 @@ export function parseConfig(text: string | null): { ok: true; config: Config } |
     const v = raw.reviewContext;
     if (typeof v !== 'string') return { ok: false, error: 'detent.json: "reviewContext" must be a string' };
     config.reviewContext = v;
+  }
+
+  if (Object.hasOwn(raw, 'prReview')) {
+    const r = parsePrReview(raw.prReview);
+    if (!r.ok) return r;
+    config.prReview = r.value;
   }
 
   return { ok: true, config };

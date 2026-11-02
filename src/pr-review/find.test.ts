@@ -100,3 +100,17 @@ describe('runFind usage', () => {
     expect(out.usage.calls).toBe(1);
   });
 });
+
+describe('runFind: unknown keys', () => {
+  it('drops an unknown key on a model finding', async () => {
+    const withExtra = { findings: [{ ...payload.findings[0], injected: 'x' }] };
+    const { findings } = await runFind(deps(respond(JSON.stringify(withExtra))), {
+      instructions: 'i',
+      context: 'c',
+      prTitle: 'T',
+      prBody: 'B',
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).not.toHaveProperty('injected');
+  });
+});

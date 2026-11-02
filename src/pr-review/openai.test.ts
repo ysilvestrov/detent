@@ -245,3 +245,64 @@ describe('callStructured usage', () => {
     expect(out.usage.promptTokens).toBe(0);
   });
 });
+
+describe('callStructured: provider name, extraBody, key scrubbing', () => {
+  const msgs = [{ role: 'user' as const, content: 'hi' }];
+  const fmt = { name: 'review', schema: SCHEMA };
+
+  it('uses a custom providerName in error messages instead of OpenAI', async () => {
+    const fetchFn = (async () =>
+      ({ ok: false, status: 400, text: async () => 'bad' }) as unknown as Response) as unknown as typeof fetch;
+    const err = (await callStructured({ ...deps(fetchFn), providerName: 'Anthropic' }, msgs, fmt).catch((e) => e)) as Error;
+    expect(err.message).toContain('Anthropic HTTP 400');
+    expect(err.message).not.toContain('OpenAI');
+  });
+
+  it('serializes a request without extraBody byte for byte as before', async () => {
+    let raw = '';
+    const fetchFn = (async (_u: string, init: RequestInit) => {
+      raw = String(init.body);
+      return ok('{}');
+    }) as unknown as typeof fetch;
+    await callStructured(deps(fetchFn), msgs, fmt);
+    expect(raw).toBe(
+      '{"model":"gpt-5.4-mini","max_completion_tokens":8000,"response_format":{"type":"json_schema","json_schema":{"name":"review","strict":true,"schema":{"type":"object","properties":{},"additionalProperties":false}}},"messages":[{"role":"user","content":"hi"}]}',
+    );
+  });
+
+  it('replaces every occurrence of the API key with *** in a thrown error', async () => {
+    const fetchFn = (async () =>
+      ({ ok: false, status: 401, text: async () => 'bad key sk-test, again sk-test' }) as unknown as Response) as unknown as typeof fetch;
+    const err = (await callStructured(deps(fetchFn), msgs, fmt).catch((e) => e)) as Error;
+    expect(err).toBeInstanceOf(NonRetryableError);
+    expect(err.message).not.toContain('sk-test');
+    expect(err.message).toContain('bad key ***, again ***');
+  });
+
+  it('scrubs the key from a retried transport failure too', async () => {
+    const fetchFn = (async () => {
+      throw new Error('connect failed for Bearer sk-test');
+    }) as unknown as typeof fetch;
+    const err = (await callStructured(deps(fetchFn), msgs, fmt).catch((e) => e)) as Error;
+    expect(err.message).toContain('after 3 attempts');
+    expect(err.message).not.toContain('sk-test');
+  });
+
+  it('keeps the usage of a billed empty completion when scrubbing', async () => {
+    const fetchFn = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => ({ choices: [{ message: { content: '' } }], usage: { prompt_tokens: 7, completion_tokens: 3 } }),
+      }) as unknown as Response) as unknown as typeof fetch;
+    const err = (await callStructured(deps(fetchFn), msgs, fmt).catch((e) => e)) as NonRetryableError;
+    expect(err.usage?.promptTokens).toBe(7);
+  });
+
+  it('an empty key replaces nothing', async () => {
+    const fetchFn = (async () =>
+      ({ ok: false, status: 400, text: async () => 'abc' }) as unknown as Response) as unknown as typeof fetch;
+    const err = (await callStructured({ ...deps(fetchFn), apiKey: '' }, msgs, fmt).catch((e) => e)) as Error;
+    expect(err.message).toBe('OpenAI HTTP 400: abc');
+  });
+});
