@@ -302,8 +302,8 @@ What release 1 has and has not proved, from the spec's claim → evidence table 
 
 1. Merge to `main`, then tag `v<version>` (the version in `package.json`) on the merged commit.
 2. Push the tag: `git push origin v<version>`.
-3. Make a clean checkout of the tag and run `npm ci`, then `npm run gate`.
-   Do not publish if it fails.
+3. Make a clean checkout of the tag and run `npm ci`, then `npm run gate`, then `npm run smoke`.
+   Do not publish if either fails.
 4. Run `npm login`, then `npm publish --dry-run` to see what would be published.
 5. Run `npm publish` and enter the 2FA code. `publishConfig.access` is already `public`, and
    `prepack` builds `dist/`.
@@ -319,3 +319,14 @@ What release 1 has and has not proved, from the spec's claim → evidence table 
 Inside this repository the scoped form `npx -y @ysilvestrov/detent` fails, because npx resolves
 that name to the root package and finds no bin. Use `node dist/cli.js`, or `npx detent` after a
 build.
+
+`npm run smoke` packs the repository, installs the archive into a temp folder and checks the
+installed `detent`: `--version`, refusals, `install`, and that the package has every file of
+`skills/`, `prompts/` and `constitution/`. It deletes nothing: each run leaves a `detent-smoke-*`
+folder of about 250 KB in the system temp, which you remove by hand. It prints the path.
+
+CI runs on every pull request and every push to `main`: `npm run gate` and `npm run smoke` on
+Ubuntu with Node 24 and on Windows with Node 26, and `npm run smoke` alone on Ubuntu with Node 20,
+the minimum in `engines`. CI does not publish and does not run the reviewers, so `cross-review` is
+checked only for its refusal. A red check does not block a merge until the owner makes it required
+in the branch settings.

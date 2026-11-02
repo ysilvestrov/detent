@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ matrix.os }}, Node ${{ matrix.node }}${{ matrix.gate && '' || ', smoke only' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, node: 24, gate: true }
+          - { os: windows-latest, node: 26, gate: true }
+          # The minimum in `engines`. vitest does not promise Node 20, so only what users run.
+          - { os: ubuntu-latest, node: 20, gate: false }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run gate
+        if: matrix.gate
+      - run: npm run smoke
