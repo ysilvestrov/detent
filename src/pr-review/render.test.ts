@@ -19,6 +19,7 @@ const base = {
   costLine: 'find skipped · verify skipped · this run $0.00 · PR total $0.00',
   head: 'a'.repeat(40),
   spend: { usd: 0, runs: 1, unpriced: 0 },
+  scope: 'scope-a',
 };
 
 describe('renderBody', () => {
@@ -130,6 +131,11 @@ describe('renderBody', () => {
     expect(state.head).toBe('c'.repeat(40));
     expect(state.spend).toEqual({ usd: 0.21, runs: 3, unpriced: 0 });
     expect(state.findings.map((f) => f.claim)).toEqual(['first', 'second']);
+  });
+
+  it('writes the scope it was given into the state block', () => {
+    const body = renderBody({ ...base, open: [], closed: [], scope: '0123456789abcdef' });
+    expect(parseState(body)!.scope).toBe('0123456789abcdef');
   });
 
   it('caps the number of open findings and says it did', () => {

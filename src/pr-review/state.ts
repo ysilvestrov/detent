@@ -34,6 +34,11 @@ export interface ReviewState {
   /** Open findings, in the order they were first published. */
   findings: StoredFinding[];
   spend: Spend;
+  /**
+   * Fingerprint of the settings this review was made under (see settings.ts). Absent in a
+   * state written before it existed; such a state is trusted, not discarded.
+   */
+  scope?: string;
 }
 
 /** A quote longer than this is stored truncated; it only has to re-anchor. */
@@ -95,6 +100,7 @@ export function parseState(body: string | null | undefined): ReviewState | null 
   }
   if (!isReviewState(parsed)) return null;
   // Only the known fields, as zod.object returned them.
+  const scope = parsed.scope === undefined ? {} : { scope: parsed.scope };
   return {
     v: 1,
     head: parsed.head,
@@ -109,6 +115,7 @@ export function parseState(body: string | null | undefined): ReviewState | null 
       evidence: f.evidence,
     })),
     spend: { usd: parsed.spend.usd, runs: parsed.spend.runs, unpriced: parsed.spend.unpriced },
+    ...scope,
   };
 }
 

@@ -34,6 +34,8 @@ export interface RenderParams {
   /** The commit this review was computed against; goes into the state block. */
   head: string;
   spend: Spend;
+  /** Fingerprint of the settings this review was made under; stored in the state block. */
+  scope: string;
   unreviewedCount?: number;
 }
 
@@ -69,6 +71,7 @@ function assemble(p: {
   omitted: number;
   head: string;
   spend: Spend;
+  scope: string;
   unreviewedCount?: number;
 }): string {
   const sections: string[] = [];
@@ -118,6 +121,7 @@ function assemble(p: {
       head: p.head,
       findings: p.open.map((item) => item.finding),
       spend: p.spend,
+      scope: p.scope,
     }),
   );
 

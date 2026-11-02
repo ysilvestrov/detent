@@ -85,7 +85,7 @@ async function request(
   format: JsonSchemaFormat,
   maxCompletionTokens: number,
 ): Promise<{ content: string; usage: Usage }> {
-  const fetchFn =deps.fetchFn ?? fetch;
+  const fetchFn = deps.fetchFn ?? fetch;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const attempts = deps.attempts ?? 3;
   const name = deps.providerName ?? 'OpenAI';

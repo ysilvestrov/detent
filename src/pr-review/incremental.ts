@@ -28,6 +28,8 @@ export function decideMode(p: {
   state: ReviewState | null;
   headSha: string;
   baseRef: string;
+  /** Fingerprint of the settings in force now; a state made under other settings is not trusted. */
+  scope: string;
   hasCommit: (sha: string) => boolean;
   isAncestor: (ancestor: string, descendant: string) => boolean;
 }): ModeDecision {
@@ -37,6 +39,12 @@ export function decideMode(p: {
     return { mode: 'full', diffSpec: full, prSpec: full, reason: 'no previous review state on this PR' };
   }
   const stored = p.state.head;
+
+  // Before the head comparison: with the same head, republish would put back a review made under
+  // other patterns or prompts. A state with no scope predates the field and is trusted.
+  if (p.state.scope !== undefined && p.state.scope !== p.scope) {
+    return { mode: 'full', diffSpec: full, prSpec: full, reason: 'settings changed since the last review' };
+  }
 
   if (!p.hasCommit(stored)) {
     return {
