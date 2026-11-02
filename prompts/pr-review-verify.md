@@ -1,5 +1,7 @@
 # AI PR Review — verification pass
 
+Project context: {{reviewContext}}
+
 You are the *verification* stage. You are given one finding raised by an earlier pass, and the
 **full current contents** of the file it refers to. Decide one thing: **would a maintainer who
 acted on this finding end up with better code?** A finding can be perfectly accurate about the

@@ -33,7 +33,7 @@ export function decideMode(p: {
   hasCommit: (sha: string) => boolean;
   isAncestor: (ancestor: string, descendant: string) => boolean;
 }): ModeDecision {
-  const full = `origin/${p.baseRef}...HEAD`;
+  const full = `refs/remotes/origin/${p.baseRef}...HEAD`;
 
   if (!p.state) {
     return { mode: 'full', diffSpec: full, prSpec: full, reason: 'no previous review state on this PR' };

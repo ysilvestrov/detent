@@ -93,13 +93,15 @@ export function loadSettings(
  * fall back to the defaults: an incomplete checkout would otherwise review under settings nobody chose.
  */
 export function baseReader(cwd: string, baseRef: string): (path: string) => string | null {
-  const ref = `origin/${baseRef}`;
+  // The full ref name: a tag called `origin/<base>` would otherwise shadow the branch, and a same-repo
+  // author could steer the review from a tag that is not in the PR diff.
+  const ref = `refs/remotes/origin/${baseRef}`;
   const git = (args: string[]) =>
     spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true });
 
   const check = git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
   if (check.error || check.status !== 0) {
-    throw new ConfigError(`cannot read the settings: ${ref} is not in this checkout (fetch the base branch, e.g. actions/checkout with fetch-depth: 0)`);
+    throw new ConfigError(`cannot read the settings: origin/${baseRef} is not in this checkout (fetch the base branch, e.g. actions/checkout with fetch-depth: 0)`);
   }
   return (path) => {
     const r = git(['show', `${ref}:${path}`]);

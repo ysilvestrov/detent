@@ -208,8 +208,8 @@ describe('pr-review in CI', () => {
 });
 
 describe('pr-review --replay', () => {
-  function replay(extraEnv: Record<string, string> = {}) {
-    const h = harness({ env: { GITHUB_EVENT_NAME: '', GITHUB_EVENT_PATH: '', GITHUB_TOKEN: '', ...extraEnv } });
+  function replay(extraEnv: Record<string, string> = {}, model?: () => Response) {
+    const h = harness({ env: { GITHUB_EVENT_NAME: '', GITHUB_EVENT_PATH: '', GITHUB_TOKEN: '', ...extraEnv }, ...(model ? { model } : {}) });
     const head = git(h.dir, 'rev-parse', 'HEAD');
     h.io.gh = () => JSON.stringify({ title: 'A change', body: null, headRefOid: head, baseRefName: 'main' });
     return h;
@@ -229,6 +229,30 @@ describe('pr-review --replay', () => {
     put(h.dir, 'detent.json', JSON.stringify({ prReview: { findModel: 'from-worktree' } }));
     expect(await prReview(['--replay', '7'], h.io)).toBe(EXIT.ok);
     expect(modelOf(modelCalls(h.calls)[0]!)).toBe('from-worktree');
+  });
+
+  it('runs the real git closures, gate and verify: both models are asked and the finding is printed', async () => {
+    const finding = {
+      file: 'src/a.ts',
+      start_line: 2,
+      end_line: 2,
+      quote: 'export const b = 3;',
+      claim: 'CLAIM_MARKER b is never used',
+      why_it_breaks: 'dead export',
+      severity: 'P2',
+      confidence: 'high',
+    };
+    const answers = [
+      ok({ choices: [{ message: { content: JSON.stringify({ findings: [finding] }) } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }),
+      ok({
+        choices: [{ message: { content: JSON.stringify({ verdicts: [{ index: 1, verdict: 'confirmed', evidence: 'b is exported and unused' }] }) } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      }),
+    ];
+    const h = replay({ AI_REVIEW_MODEL: 'find-x', AI_REVIEW_VERIFY_MODEL: 'verify-y' }, () => answers.shift()!);
+    expect(await prReview(['--replay', '7'], h.io)).toBe(EXIT.ok);
+    expect(modelCalls(h.calls).map(modelOf)).toEqual(['find-x', 'verify-y']);
+    expect(h.out.join('\n')).toContain('CLAIM_MARKER b is never used');
   });
 
   it('exits 2 for an unknown --provider, listing the providers', async () => {

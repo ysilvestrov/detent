@@ -258,6 +258,11 @@ describe('contextReader', () => {
     expect(read('src/a.ts')).toBe('BODY OF src/a.ts');
   });
 
+  it('treats a binary body as diff-only (a PNG header carries a NUL byte)', () => {
+    const png = '\x89PNG\r\n\x1a\n\0\0\0\rIHDR';
+    expect(contextReader(() => png, PATTERNS)('assets/logo.png')).toBeNull();
+  });
+
   it('propagates a null from the underlying reader', () => {
     expect(contextReader(() => null, PATTERNS)('src/a.ts')).toBeNull();
   });
@@ -551,7 +556,7 @@ describe('runReview — full mode', () => {
         },
       }),
     );
-    expect(listed).toEqual(['origin/main...HEAD']);
+    expect(listed).toEqual(['refs/remotes/origin/main...HEAD']);
   });
 
   it('reviews the whole PR when there is no previous review and publishes the finding', async () => {
@@ -899,7 +904,7 @@ describe('skip comment lifecycle (warsaw-beer-bot#816, warsaw-beer-bot#526)', ()
         hasCommit: (sha) => sha === 'a'.repeat(40) || sha === 'b'.repeat(40),
         isAncestor: (ancestor, desc) => ancestor === 'a'.repeat(40) && desc === 'b'.repeat(40),
         listChangedFiles: (spec) => {
-          if (spec === 'origin/main...HEAD') {
+          if (spec === 'refs/remotes/origin/main...HEAD') {
             return ['src/a.ts', 'deploy/warsaw-beer-bot.service'];
           }
           return ['src/a.ts'];
@@ -1049,7 +1054,7 @@ describe('runReview — incremental mode', () => {
         },
       }),
     );
-    expect(listed).toEqual([`${'a'.repeat(40)}..HEAD`, 'origin/main...HEAD']);
+    expect(listed).toEqual([`${'a'.repeat(40)}..HEAD`, 'refs/remotes/origin/main...HEAD']);
     expect(diffed).toEqual([`${'a'.repeat(40)}..HEAD`]);
   });
 
@@ -1065,7 +1070,7 @@ describe('runReview — incremental mode', () => {
         githubFetch: gh.fetchFn,
         log: (m) => logs.push(m),
         listChangedFiles: (spec) =>
-          spec === 'origin/main...HEAD' ? ['src/domain/brewery-aliases.ts'] : ['scripts/cross-review/core.ts', 'scripts/cross-review/cli.ts'],
+          spec === 'refs/remotes/origin/main...HEAD' ? ['src/domain/brewery-aliases.ts'] : ['scripts/cross-review/core.ts', 'scripts/cross-review/cli.ts'],
       }),
     );
     expect(ai.calls).toEqual([]);
@@ -1084,7 +1089,7 @@ describe('runReview — incremental mode', () => {
       deps({
         openaiFetch: ai.fetchFn,
         githubFetch: gh.fetchFn,
-        listChangedFiles: (spec) => (spec === 'origin/main...HEAD' ? ['src/a.ts'] : ['scripts/other.ts', 'src/a.ts']),
+        listChangedFiles: (spec) => (spec === 'refs/remotes/origin/main...HEAD' ? ['src/a.ts'] : ['scripts/other.ts', 'src/a.ts']),
         getDiff: (_spec, files) => {
           diffedFiles.push(files);
           return DIFF;

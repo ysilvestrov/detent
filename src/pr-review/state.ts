@@ -86,7 +86,8 @@ export function renderState(state: ReviewState): string {
  */
 export function parseState(body: string | null | undefined): ReviewState | null {
   if (!body) return null;
-  const start = body.indexOf(STATE_OPEN);
+  // The last block: the state is always appended after the findings, whose text can quote the marker.
+  const start = body.lastIndexOf(STATE_OPEN);
   if (start === -1) return null;
   const from = start + STATE_OPEN.length;
   const end = body.indexOf(STATE_CLOSE, from);

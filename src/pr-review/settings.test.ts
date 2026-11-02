@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -79,16 +78,8 @@ describe('loadSettings', () => {
     const base = { 'detent.json': JSON.stringify({ reviewContext: 'ctx', prReview: { include: ['src/**'] } }) };
     const scopeOf = (map: Record<string, string>) => loadSettings(files(map), readDefault).scope;
 
-    it('is the first 16 hex of the sha256 of the four ingredients', () => {
-      const expected = createHash('sha256')
-        .update(JSON.stringify([{ include: ['src/**'] }, 'ctx', 'find ctx', 'verify ctx']))
-        .digest('hex')
-        .slice(0, 16);
-      expect(scopeOf(base)).toBe(expected);
-    });
-
-    it('is the same for the same settings', () => {
-      expect(scopeOf(base)).toBe(scopeOf({ ...base }));
+    it('is a pinned 16-hex fingerprint of the four ingredients', () => {
+      expect(scopeOf(base)).toBe('6eeead0c798173c4');
     });
 
     it('changes with each of the four ingredients', () => {
@@ -148,6 +139,20 @@ describe('baseReader', () => {
     expect(s.findPrompt).toBe('base find');
   });
 
+  it('reads the branch, not a tag called origin/<base>', () => {
+    const dir = repo();
+    put(dir, 'detent.json', JSON.stringify({ prReview: { include: ['branch/**'] } }));
+    const base = commit(dir, 'base');
+    git(dir, 'update-ref', 'refs/remotes/origin/main', base);
+
+    put(dir, 'detent.json', JSON.stringify({ prReview: { include: ['tag/**'] } }));
+    const forged = commit(dir, 'forged');
+    git(dir, 'tag', 'origin/main', forged);
+
+    const s = loadSettings(baseReader(dir, 'main'), readDefault);
+    expect(s.patterns.include).toEqual(['branch/**']);
+  });
+
   it('reads a base whose name has a slash', () => {
     const dir = repo();
     put(dir, 'detent.json', JSON.stringify({ prReview: { ignore: ['legacy/**'] } }));
@@ -184,6 +189,7 @@ describe('loadSettings with the prompts of the package', () => {
     expect(s.findPrompt).toContain('Project context: none stated');
     expect(s.findPrompt).not.toContain('{{');
     expect(s.verifyPrompt).toContain('verification pass');
+    expect(s.verifyPrompt).toContain('Project context: none stated');
     expect(s.verifyPrompt).not.toContain('{{');
   });
 });

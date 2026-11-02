@@ -47,6 +47,8 @@ delete detentEnv.DETENT_AUTHOR;
 delete detentEnv.CROSS_REVIEW_ACTIVE;
 // `pr-review` reads the event of a CI run; a smoke run in Actions must not look like one.
 for (const name of ['GITHUB_EVENT_NAME', 'GITHUB_EVENT_PATH', 'GITHUB_REPOSITORY', 'GITHUB_TOKEN']) delete detentEnv[name];
+// No provider key: `--replay` then stops at the key check, after the settings (and the prompts) are loaded.
+for (const name of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY']) delete detentEnv[name];
 
 // The local shim itself: `npx` would fall back to a global detent if the package lost its `bin`.
 const shim = join(consumer, 'node_modules', '.bin', process.platform === 'win32' ? 'detent.cmd' : 'detent');
@@ -94,6 +96,8 @@ detent(['--version'], { code: 0, stdout: (out) => out.trim() === version });
 detent(['nope'], { code: 2, stderr: (err) => err.includes('unknown command') });
 detent(['cross-review'], { code: 2, stderr: (err) => err.includes('--author') });
 detent(['pr-review'], { code: 2, stderr: (err) => err.includes('pull_request') });
+// loadSettings runs before the key check and reads the shipped prompts of the installed package; no network.
+detent(['pr-review', '--replay', '1'], { code: 2, stderr: (err) => err.includes('is not set') });
 
 // The `exports` of the package: the subpath that warsaw-beer-bot imports resolves from a consumer folder.
 writeFileSync(join(consumer, 'exports-check.mjs'), "const m = await import('@ysilvestrov/detent/pr-review');\nconsole.log(typeof m.verifyAll);\n");

@@ -75,6 +75,18 @@ describe('runFind', () => {
       }),
     ).rejects.toThrow(/schema/i);
   });
+
+  it('keeps the raw model output out of a JSON failure message', async () => {
+    await expect(
+      runFind(deps(respond('RAW_MARKER not json')), { instructions: 'x', context: 'y', prTitle: 'T', prBody: 'B' }),
+    ).rejects.toThrow(new Error('Pass-1 output could not be parsed as JSON'));
+  });
+
+  it('keeps the raw model output out of a schema failure message', async () => {
+    await expect(
+      runFind(deps(respond('{"findings":[{"file":"RAW_MARKER"}]}')), { instructions: 'x', context: 'y', prTitle: 'T', prBody: 'B' }),
+    ).rejects.toThrow(new Error('Pass-1 output did not match the schema'));
+  });
 });
 
 import { runFind as runFindUsage } from './find.js';

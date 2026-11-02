@@ -79,7 +79,7 @@ export function resolveReplayBase(p: {
   head: string;
   mergeBase: (a: string, b: string) => string;
 }): string {
-  return p.explicit ?? p.mergeBase(`origin/${p.baseRefName}`, p.head);
+  return p.explicit ?? p.mergeBase(`refs/remotes/origin/${p.baseRefName}`, p.head);
 }
 
 export interface ReplayArgs {

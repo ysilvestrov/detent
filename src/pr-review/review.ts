@@ -50,12 +50,20 @@ export function isBodyExcluded(path: string, patterns: FilePatterns): boolean {
  * body to adjudicate. Give either of them this reader and every finding inside a
  * test file becomes `quote_not_found` — the run stays green and a whole class of
  * finding disappears without a trace.
+ *
+ * A body with a NUL byte is binary and is hidden the same way: under the default `include: ["**"]`
+ * it would otherwise go into the prompt as text.
  */
 export function contextReader(
   readFile: (path: string) => string | null,
   patterns: FilePatterns,
 ): (path: string) => string | null {
-  return (path) => (isBodyExcluded(path, patterns) ? null : readFile(path));
+  return (path) => {
+    if (isBodyExcluded(path, patterns)) return null;
+    const body = readFile(path);
+    // A binary file matched by a wide include is diff-only: its bytes as text are noise for the model.
+    return body !== null && body.includes('\0') ? null : body;
+  };
 }
 
 

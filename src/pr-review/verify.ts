@@ -103,15 +103,15 @@ export async function verifyFile(
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { verdicts: new Map(), usage, error: `Pass-2 output was not JSON: ${message.slice(0, 200)}` };
+  } catch {
+    // No raw text and no parser message (V8 quotes the input): the error reaches the public review.
+    return { verdicts: new Map(), usage, error: 'Pass-2 output was not JSON' };
   }
   if (!isVerdicts(parsed)) {
     return {
       verdicts: new Map(),
       usage,
-      error: `Pass-2 output did not match the schema: ${content.slice(0, 200)}`,
+      error: 'Pass-2 output did not match the schema',
     };
   }
 

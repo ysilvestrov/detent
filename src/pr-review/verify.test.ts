@@ -180,6 +180,26 @@ describe('verifyAll', () => {
   });
 });
 
+describe('verifyAll — errors carry no raw model output', () => {
+  it('reports non-JSON content without the content', async () => {
+    const out = await verifyAll(deps(respond('RAW_MARKER not json')), {
+      instructions: 'verify',
+      requests: [req()],
+      fileContent: () => 'file body',
+    });
+    expect(out.results[0]!.evidence).toBe('Pass-2 output was not JSON');
+  });
+
+  it('reports a schema mismatch without the content', async () => {
+    const out = await verifyAll(deps(respond('{"verdicts":[{"index":1,"verdict":"RAW_MARKER"}]}')), {
+      instructions: 'verify',
+      requests: [req()],
+      fileContent: () => 'file body',
+    });
+    expect(out.results[0]!.evidence).toBe('Pass-2 output did not match the schema');
+  });
+});
+
 describe('verifyAll — billing of a completed but malformed call', () => {
   it('counts the usage of a 200 response whose content is not usable', async () => {
     const out = await verifyAll(deps(respond('not json at all')), {
