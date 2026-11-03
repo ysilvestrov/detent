@@ -8,10 +8,13 @@ import { isScorable, parseRecords, scrubKeys, totalSpend } from './records.mjs';
 const KEY_ENV = { openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', openrouter: 'OPENROUTER_API_KEY' };
 const BASE_ENV = ['PATH', 'HOME', 'GH_TOKEN'];
 const FINDINGS_DIR = 'findings';
+const META_SUFFIX = '.meta.json';
 const MIN_CORPUS = 3;
+const STDERR_TAIL = 3;
 const SOURCE_BUDGET = /^Context budget: \d+ file\(s\) sent as diff only(?:: (.+)|\.)$/m;
 const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)(tests?|__tests__)\//;
 const EXIT = { usage: 2, ceiling: 3, leaked: 4, failed: 5 };
+const ORPHAN = 'the funnel stopped before this run was absorbed';
 
 /** The arguments after `node cli.js` for one run. `paths` holds the record, the findings to write, the findings to verify. */
 export function childArgs(run, paths) {
@@ -42,61 +45,160 @@ export function childEnv(run, keys, base) {
   return env;
 }
 
-/** Every line of every shared record file, in file order. */
+/** Every line of every shared record file, in file order. A broken line names its file. */
 function readShared(recordsDir) {
   if (!existsSync(recordsDir)) return [];
   return readdirSync(recordsDir)
     .filter((name) => name.endsWith('.jsonl'))
     .sort()
-    .flatMap((name) => parseRecords(readFileSync(join(recordsDir, name), 'utf8')));
+    .flatMap((name) => {
+      try {
+        return parseRecords(readFileSync(join(recordsDir, name), 'utf8'));
+      } catch (error) {
+        throw new Error(`${name}: ${error.message}`);
+      }
+    });
+}
+
+/** Appends whole lines; if the file ends in a torn line, the new ones start on a line of their own. */
+function appendLines(file, lines) {
+  if (lines.length === 0) return;
+  mkdirSync(join(file, '..'), { recursive: true });
+  const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  const lead = text === '' || text.endsWith('\n') ? '' : '\n';
+  appendFileSync(file, lead + lines.map((line) => `${JSON.stringify(line)}\n`).join(''));
+}
+
+/** Only the provider keys are secrets; another value in the keys file may be a plain number. */
+function scrubber(keys) {
+  const secrets = Object.fromEntries(Object.values(KEY_ENV).filter((name) => keys[name]).map((name) => [name, keys[name]]));
+  let leaked = false;
+  return {
+    scrub(text) {
+      const scrubbed = scrubKeys(text, secrets);
+      leaked ||= scrubbed.leaked;
+      return scrubbed.text;
+    },
+    leaked: () => leaked,
+  };
+}
+
+/** Parseable lines of a temp record. Only a torn last line is excused; a broken line before it marks the run. */
+function salvage(text) {
+  const rows = text.split('\n').filter((raw) => raw.trim() !== '');
+  const lines = [];
+  let broken = false;
+  rows.forEach((raw, i) => {
+    try {
+      const line = JSON.parse(raw);
+      if (typeof line === 'object' && line !== null && !Array.isArray(line)) lines.push(line);
+      else broken = true;
+    } catch {
+      if (i < rows.length - 1) broken = true;
+    }
+  });
+  return { lines, broken };
 }
 
 const findingsName = (run, attempt) => `b${run.batch}-${run.label}-pr${run.pr}-d${run.draw}-a${attempt}-${run.mode}.json`;
-const stageModel = (run, stage) => (stage === 'verify' ? run.verifyModel : run.findModel);
+const tail = (text) => text.trim().split('\n').filter(Boolean).slice(-STDERR_TAIL).join(' | ');
 
 /**
- * Runs one child. Its record goes to a file of its own, is checked for keys, and only then joins the shared record,
- * a killed or failed run included, so its paid calls count.
+ * Moves the lines of one temp record into the shared record, scrubbed and enriched. The `call` lines go first, so a
+ * failure after them cannot lose paid calls; the findings copy comes next, and the `run` line closes the run last.
+ * A run the child did not close properly gets a failed `run` line of the funnel's own.
+ * `childCode` is null for an orphan, whose child's exit was never seen.
  */
+function absorb({ meta, recordPath, findingsPath, childCode, recordsDir, scrub }) {
+  const { lines, broken } = salvage(existsSync(recordPath) ? scrub(readFileSync(recordPath, 'utf8')) : '');
+  const closing = lines.find((line) => line.type === 'run');
+  const code = childCode ?? closing?.exit ?? null;
+  let problem = null;
+  if (broken) problem = 'the record had an unreadable line';
+  else if (closing === undefined) problem = code === null ? ORPHAN : `the child ended with exit ${code} and wrote no run line`;
+  else if (code !== closing.exit) problem = `the child exited ${code} after writing a run line with exit ${closing.exit}`;
+
+  const enrich = (line, findingsFile) => ({
+    ...line,
+    requestedModel: meta.models[line.type === 'call' ? line.stage : meta.mode === 'verify' ? 'verify' : 'find'],
+    key: meta.key,
+    mode: meta.mode,
+    attempt: meta.attempt,
+    findingsFile,
+  });
+  const shared = join(recordsDir, `batch-${meta.batch}.jsonl`);
+  appendLines(shared, lines.filter((line) => line.type !== 'run').map((line) => enrich(line, null)));
+
+  let clean = problem === null && isScorable(closing);
+  let findingsFile = null;
+  if (clean && meta.mode === 'find') {
+    try {
+      mkdirSync(join(recordsDir, FINDINGS_DIR), { recursive: true });
+      writeFileSync(join(recordsDir, meta.findingsFile), scrub(readFileSync(findingsPath, 'utf8')));
+      findingsFile = meta.findingsFile;
+    } catch (error) {
+      problem = `findings copy failed: ${error.message}`;
+      clean = false;
+    }
+  }
+  if (closing !== undefined || !meta.expectFailure) {
+    const base = closing ?? { type: 'run', runId: lines[0]?.runId ?? meta.id, batch: meta.batch, label: meta.label, provider: meta.route, pr: meta.pr, draw: meta.draw };
+    const line = problem === null ? base : { ...base, exit: code ?? 1, error: problem === ORPHAN || closing === undefined || closing.error === null ? problem : closing.error };
+    appendLines(shared, [enrich(line, findingsFile)]);
+  }
+  return { clean };
+}
+
+/** Absorbs every run whose temp record was never absorbed: the funnel died, or something threw, after the child paid. */
+function adoptOrphans({ recordsDir, tmpDir, scrub, out }) {
+  if (!existsSync(tmpDir)) return;
+  for (const name of readdirSync(tmpDir).filter((n) => n.endsWith(META_SUFFIX)).sort()) {
+    const id = name.slice(0, -META_SUFFIX.length);
+    if (existsSync(join(tmpDir, `${id}.absorbed`))) continue;
+    let meta;
+    try {
+      meta = { ...JSON.parse(readFileSync(join(tmpDir, name), 'utf8')), id };
+    } catch {
+      out(`skip ${name}: unreadable, so no child was started from it`);
+      continue;
+    }
+    absorb({ meta, recordPath: join(tmpDir, `${id}.jsonl`), findingsPath: join(tmpDir, `${id}-findings.json`), childCode: null, recordsDir, scrub });
+    writeFileSync(join(tmpDir, `${id}.absorbed`), '');
+    out(`adopted the record of ${meta.key} left in ${tmpDir}`);
+  }
+}
+
+/** Runs one child. Its record goes to a file of its own, is checked for keys, and only then joins the shared record. */
 async function execute({ run, attempt, keys, base, repo, recordsDir, tmpDir, spawnRun, out, verifyFrom }) {
   const id = randomUUID();
-  const record = join(tmpDir, `${id}.jsonl`);
-  const findings = join(tmpDir, `${id}-findings.json`);
-  const key = runKey(run);
-  mkdirSync(tmpDir, { recursive: true });
-  const child = await spawnRun(childArgs(run, { record, findings, verifyFrom }), childEnv(run, keys, base), repo);
-
-  let leaked = false;
-  const scrub = (text) => {
-    const scrubbed = scrubKeys(text, keys);
-    leaked ||= scrubbed.leaked;
-    return scrubbed.text;
+  const recordPath = join(tmpDir, `${id}.jsonl`);
+  const findingsPath = join(tmpDir, `${id}-findings.json`);
+  const { scrub, leaked } = scrubber(keys);
+  const meta = {
+    id,
+    key: runKey(run),
+    mode: run.mode,
+    attempt,
+    batch: run.batch,
+    label: run.label,
+    pr: run.pr,
+    draw: run.draw,
+    route: run.route,
+    models: { find: run.findModel, verify: run.verifyModel },
+    expectFailure: run.expectFailure,
+    findingsFile: `${FINDINGS_DIR}/${findingsName(run, attempt)}`,
   };
+  mkdirSync(tmpDir, { recursive: true });
+  // The sidecar says what the temp record means, so a run the funnel did not live to absorb can be absorbed later.
+  writeFileSync(join(tmpDir, `${id}${META_SUFFIX}`), JSON.stringify(meta));
+
+  const child = await spawnRun(childArgs(run, { record: recordPath, findings: findingsPath, verifyFrom }), childEnv(run, keys, base), repo);
   for (const text of [child.stdout, child.stderr]) {
     for (const line of scrub(text).split('\n')) if (line !== '') out(line);
   }
-
-  const lines = existsSync(record) ? parseRecords(scrub(readFileSync(record, 'utf8'))) : [];
-  const closing = lines.find((line) => line.type === 'run');
-  const clean = child.code === 0 && closing !== undefined && isScorable(closing);
-  let findingsFile = null;
-  if (run.mode === 'find' && clean && existsSync(findings)) {
-    findingsFile = `${FINDINGS_DIR}/${findingsName(run, attempt)}`;
-    mkdirSync(join(recordsDir, FINDINGS_DIR), { recursive: true });
-    writeFileSync(join(recordsDir, findingsFile), scrub(readFileSync(findings, 'utf8')));
-  }
-
-  mkdirSync(recordsDir, { recursive: true });
-  const enriched = lines.map((line) => ({
-    ...line,
-    requestedModel: stageModel(run, line.type === 'call' ? line.stage : run.mode === 'verify' ? 'verify' : 'find'),
-    key,
-    mode: run.mode,
-    attempt,
-    findingsFile: line.type === 'run' ? findingsFile : null,
-  }));
-  appendFileSync(join(recordsDir, `batch-${run.batch}.jsonl`), enriched.map((line) => `${JSON.stringify(line)}\n`).join(''));
-  return { clean, leaked };
+  const { clean } = absorb({ meta, recordPath, findingsPath, childCode: child.code, recordsDir, scrub });
+  writeFileSync(join(tmpDir, `${id}.absorbed`), '');
+  return { clean, leaked: leaked() };
 }
 
 /**
@@ -104,12 +206,32 @@ async function execute({ run, attempt, keys, base, repo, recordsDir, tmpDir, spa
  * `code`: 0 all done, 2 refused before spending, 3 stopped at the ceiling, 4 a key was found in a line, 5 a run failed.
  */
 export async function runBatch({ runs, catalog, keys, ceilingUsd, recordsDir, tmpDir, spawnRun, out, repo, base = process.env }) {
-  const spend = () => totalSpend(readShared(recordsDir), catalog).usd;
-  const result = { code: 0, spentUsd: spend(), done: 0, failed: 0, left: 0, notApplicable: 0 };
+  const result = { code: 0, spentUsd: 0, done: 0, failed: 0, left: 0, notApplicable: 0 };
+  let warnedUnpriced = 0;
+  const spend = (lines) => {
+    const { usd, unpriced } = totalSpend(lines, catalog);
+    if (unpriced > 0 && unpriced !== warnedUnpriced) out(`warning: ${unpriced} call line(s) have no usage or no price; they count as 0 against the ceiling`);
+    warnedUnpriced = unpriced;
+    return usd;
+  };
   const pending = (from) => runs.slice(from).filter((run) => nextAction(run, readShared(recordsDir)).action === 'run').length;
 
-  const missing = [...new Set(runs.filter((run) => nextAction(run, readShared(recordsDir)).action === 'run').map((run) => KEY_ENV[run.route]))]
-    .filter((name) => !keys[name]);
+  const adoption = scrubber(keys);
+  try {
+    adoptOrphans({ recordsDir, tmpDir, scrub: adoption.scrub, out });
+    result.spentUsd = spend(readShared(recordsDir));
+  } catch (error) {
+    out(error.message);
+    return { ...result, code: EXIT.usage, left: runs.length };
+  }
+  if (adoption.leaked()) {
+    out('a key was found in an orphaned record; it is scrubbed, the spend is kept, the batch stops');
+    return { ...result, code: EXIT.leaked, left: pending(0) };
+  }
+
+  const missing = [...new Set(runs.filter((run) => nextAction(run, readShared(recordsDir)).action === 'run').map((run) => KEY_ENV[run.route]))].filter(
+    (name) => !keys[name],
+  );
   if (missing.length > 0) {
     out(`batch ${runs[0].batch} needs ${missing.join(', ')} in the keys file`);
     return { ...result, code: EXIT.usage, left: pending(0) };
@@ -140,18 +262,26 @@ export async function runBatch({ runs, catalog, keys, ceilingUsd, recordsDir, tm
       verifyFrom = join(recordsDir, file);
     }
 
-    result.spentUsd = totalSpend(lines, catalog).usd;
+    result.spentUsd = spend(lines);
     if (!admit({ spentUsd: result.spentUsd, estimateUsd: run.estimateUsd, ceilingUsd })) {
       out(`stop at the ceiling: spent ${result.spentUsd.toFixed(2)} of ${ceilingUsd}, ${pending(i)} run(s) left`);
       return { ...result, code: EXIT.ceiling, left: pending(i) };
     }
 
     out(`run ${runKey(run)} attempt ${action.attempt}`);
-    const { clean, leaked } = await execute({ run, attempt: action.attempt, keys, base, repo, recordsDir, tmpDir, spawnRun, out, verifyFrom });
-    result.spentUsd = spend();
-    if (clean || run.expectFailure) result.done += 1;
+    let outcome;
+    try {
+      outcome = await execute({ run, attempt: action.attempt, keys, base, repo, recordsDir, tmpDir, spawnRun, out, verifyFrom });
+    } catch (error) {
+      // The child's temp record is still in tmpDir with its sidecar; the next invocation adopts it before it admits anything.
+      out(`${runKey(run)}: ${error.message}; its record stays in ${tmpDir} and is adopted on the next invocation`);
+      result.failed += 1;
+      return { ...result, code: EXIT.failed, left: pending(i + 1) };
+    }
+    result.spentUsd = spend(readShared(recordsDir));
+    if (outcome.clean || run.expectFailure) result.done += 1;
     else result.failed += 1;
-    if (leaked) {
+    if (outcome.leaked) {
       out('a key was found in the output of a run; it is scrubbed, the spend is kept, the batch stops');
       return { ...result, code: EXIT.leaked, left: pending(i + 1) };
     }
@@ -159,33 +289,41 @@ export async function runBatch({ runs, catalog, keys, ceilingUsd, recordsDir, tm
   return { ...result, code: result.failed > 0 ? EXIT.failed : 0 };
 }
 
-/** What `--context-only` said about one PR: a reason it must be dropped, or null. */
-function dropReason(run) {
-  if (run.code !== 0) return `context check exited ${run.code}`;
-  if (run.stdout.includes('no reviewable files')) return 'no reviewable files';
-  const budget = SOURCE_BUDGET.exec(run.stdout);
-  if (budget === null) return 'context check printed no budget line';
+/** What `--context-only` said about one PR: `ok`, a `drop` (the spec's rule), or a `failed` check that says nothing. */
+function classify(child, scrub) {
+  if (child.code !== 0) {
+    const stderr = tail(scrub(child.stderr));
+    return { kind: 'failed', reason: `context check exited ${child.code}${stderr === '' ? '' : `: ${stderr}`}` };
+  }
+  if (child.stdout.includes('no reviewable files')) return { kind: 'drop', reason: 'no reviewable files' };
+  const budget = SOURCE_BUDGET.exec(child.stdout);
+  if (budget === null) return { kind: 'failed', reason: 'context check printed no budget line' };
   const sources = (budget[1] ?? '').split(', ').filter((file) => file !== '' && !TEST_FILE.test(file));
-  return sources.length === 0 ? null : `source file${sources.length === 1 ? '' : 's'} sent as diff only: ${sources.join(', ')}`;
+  if (sources.length === 0) return { kind: 'ok' };
+  return { kind: 'drop', reason: `source file${sources.length === 1 ? '' : 's'} sent as diff only: ${sources.join(', ')}` };
 }
 
 /**
  * Decides before any spend which PRs the measurement keeps: a source file sent as a diff only drops its PR.
- * Code 2 when #418 drops or fewer than three corpus PRs remain.
+ * Code 5 when a check itself failed (nothing is decided then), else 2 when #418 drops or fewer than three corpus PRs remain.
  */
-export async function runPreflight({ catalog, spawnRun, repo, base = process.env }) {
+export async function runPreflight({ catalog, spawnRun, repo, base = process.env, keys = {} }) {
   const env = Object.fromEntries(BASE_ENV.filter((name) => base[name] !== undefined).map((name) => [name, base[name]]));
+  const { scrub } = scrubber(keys);
   const reasons = {};
+  const failures = {};
   const check = async (pr) => {
     const head = catalog.prs[pr].head === null ? [] : ['--head', catalog.prs[pr].head];
-    const reason = dropReason(await spawnRun(['pr-review', '--replay', pr, ...head, '--context-only'], env, repo));
-    if (reason !== null) reasons[pr] = reason;
-    return reason === null;
+    const verdict = classify(await spawnRun(['pr-review', '--replay', pr, ...head, '--context-only'], env, repo), scrub);
+    if (verdict.kind === 'drop') reasons[pr] = verdict.reason;
+    if (verdict.kind === 'failed') failures[pr] = verdict.reason;
+    return verdict.kind === 'ok';
   };
   const keeps418 = await check('418');
   const corpus = [];
   for (const pr of catalog.corpus) if (await check(pr)) corpus.push(pr);
   const recall930 = await check('930');
-  const code = keeps418 && corpus.length >= MIN_CORPUS ? 0 : EXIT.usage;
-  return { code, preflight: { corpus, recall930, reasons } };
+  const decided = keeps418 && corpus.length >= MIN_CORPUS ? 0 : EXIT.usage;
+  const code = Object.keys(failures).length > 0 ? EXIT.failed : decided;
+  return { code, preflight: { corpus, recall930, reasons }, failures };
 }

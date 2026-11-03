@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -44,13 +44,12 @@ const callLine = (cost, stage = 'find', over = {}) => ({
 });
 const runLine = (over = {}) => ({ type: 'run', runId: 'r1', batch: 3, label: 'a', provider: 'openrouter', pr: '418', draw: 1, exit: 0, error: null, ...over });
 const jsonl = (...lines) => lines.map((l) => `${JSON.stringify(l)}\n`).join('');
-const ok = (cost = 0.1, over = {}) => ({
+const ok = (cost = 0.1, { record = jsonl(callLine(cost), runLine()), writes = [['--save-findings', '{"v":1}']], ...over } = {}) => ({
   code: 0,
   stdout: 'done\n',
   stderr: '',
-  record: jsonl(callLine(cost), runLine()),
-  writes: [['--save-findings', '{"v":1}']],
   ...over,
+  writes: [['--record', record], ...writes],
 });
 const failedAnswer = () => ok(0.1, { code: 5, record: jsonl(callLine(0.1), runLine({ exit: 5, error: 'boom' })) });
 
@@ -60,7 +59,6 @@ function stub(answers) {
   const spawnRun = async (args, env, cwd) => {
     const answer = answers[calls.length];
     calls.push({ args, env, cwd });
-    writeFileSync(args[args.indexOf('--record') + 1], answer.record);
     for (const [flag, text] of answer.writes) writeFileSync(args[args.indexOf(flag) + 1], text);
     return { code: answer.code, stdout: answer.stdout, stderr: answer.stderr };
   };
@@ -195,13 +193,14 @@ describe('runBatch', () => {
 
   it('counts the calls of a killed child, with a torn last line', async () => {
     const s = setup();
-    const killed = { code: 137, stdout: '', stderr: '', record: `${jsonl(callLine(0.1))}{"type":"run","runId":"r1","ba`, writes: [] };
+    const killed = { code: 137, stdout: '', stderr: '', writes: [['--record', `${jsonl(callLine(0.1))}{"type":"run","runId":"r1","ba`]] };
     const { spawnRun } = stub([killed]);
     const result = await runBatch({ ...s.common, runs: [run()], spawnRun });
     expect(result).toEqual({ code: 5, spentUsd: 0.1, done: 0, failed: 1, left: 0, notApplicable: 0 });
-    expect(parseRecords(readFileSync(s.shared(3), 'utf8'))).toEqual([
-      { ...callLine(0.1), requestedModel: 'm-find', key: '3|find|a|418|1', mode: 'find', attempt: 1, findingsFile: null },
-    ]);
+    const lines = parseRecords(readFileSync(s.shared(3), 'utf8'));
+    expect(lines[0]).toEqual({ ...callLine(0.1), requestedModel: 'm-find', key: '3|find|a|418|1', mode: 'find', attempt: 1, findingsFile: null });
+    expect(lines[1]).toMatchObject({ type: 'run', exit: 137, error: 'the child ended with exit 137 and wrote no run line', attempt: 1, findingsFile: null });
+    expect(lines).toHaveLength(2);
   });
 
   it('writes the run line with its key, mode, attempt and findings file', async () => {
@@ -357,6 +356,7 @@ describe('runPreflight', () => {
     expect(await runPreflight({ catalog: pcatalog, spawnRun, repo: '/repo', base })).toEqual({
       code: 0,
       preflight: { corpus: ['344', '348', '352'], recall930: true, reasons: {} },
+      failures: {},
     });
   });
 
@@ -365,6 +365,7 @@ describe('runPreflight', () => {
     expect(await runPreflight({ catalog: bigger, spawnRun, repo: '/repo', base })).toEqual({
       code: 0,
       preflight: { corpus: ['348', '352', '356'], recall930: true, reasons: { 344: 'source file sent as diff only: src/a.ts' } },
+      failures: {},
     });
   });
 
@@ -399,6 +400,190 @@ describe('runPreflight', () => {
     expect(await runPreflight({ catalog: pcatalog, spawnRun, repo: '/repo', base })).toEqual({
       code: 0,
       preflight: { corpus: ['344', '348', '352'], recall930: false, reasons: { 930: 'source file sent as diff only: src/b.ts' } },
+      failures: {},
     });
+  });
+});
+
+describe('runBatch after a failure', () => {
+  const noRecord = () => ({ code: 2, stdout: '', stderr: 'usage: no key', writes: [] });
+
+  it('writes a failed run line for a child that left no record, so its verify counts as failed', async () => {
+    const s = setup();
+    const { spawnRun, calls } = stub([noRecord()]);
+    const result = await runBatch({ ...s.common, runs: [run(), verifyOfA()], spawnRun });
+    const lines = parseRecords(readFileSync(s.shared(3), 'utf8'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ type: 'run', key: '3|find|a|418|1', attempt: 1, exit: 2, error: 'the child ended with exit 2 and wrote no run line', findingsFile: null });
+    expect(calls).toHaveLength(1);
+    expect(result).toEqual({ code: 5, spentUsd: 0, done: 0, failed: 2, left: 0, notApplicable: 0 });
+  });
+
+  it('counts a verify of such a find as failed on a later invocation, and reruns the find as attempt 2', async () => {
+    const s = setup();
+    await runBatch({ ...s.common, runs: [run()], spawnRun: stub([noRecord()]).spawnRun });
+    const later = await runBatch({ ...s.common, runs: [verifyOfA()], spawnRun: stub([]).spawnRun });
+    expect(later).toEqual({ code: 5, spentUsd: 0, done: 0, failed: 1, left: 0, notApplicable: 0 });
+    const rerun = stub([ok(0.1)]);
+    await runBatch({ ...s.common, runs: [run()], spawnRun: rerun.spawnRun });
+    const attempts = parseRecords(readFileSync(s.shared(3), 'utf8')).map((l) => [l.type, l.attempt]);
+    expect(attempts).toEqual([['run', 1], ['call', 2], ['run', 2]]);
+  });
+
+  it('fails a child that exited otherwise than its run line says, and does not keep its findings', async () => {
+    const s = setup();
+    const result = await runBatch({ ...s.common, runs: [run()], spawnRun: stub([ok(0.1, { code: 137 })]).spawnRun });
+    const lines = parseRecords(readFileSync(s.shared(3), 'utf8'));
+    expect(lines[1]).toMatchObject({ type: 'run', exit: 137, error: 'the child exited 137 after writing a run line with exit 0', findingsFile: null });
+    expect(result).toEqual({ code: 5, spentUsd: 0.1, done: 0, failed: 1, left: 0, notApplicable: 0 });
+  });
+
+  it('keeps the paid calls around a broken middle line, fails the run and goes on', async () => {
+    const s = setup();
+    const broken = ok(0.1, { record: `${jsonl(callLine(0.1))}not json\n${jsonl(runLine())}`, writes: [] });
+    const { spawnRun, calls } = stub([broken, ok(0.1)]);
+    const result = await runBatch({ ...s.common, runs: [run({ draw: 1 }), run({ draw: 2 })], spawnRun });
+    const lines = parseRecords(readFileSync(s.shared(3), 'utf8'));
+    expect(lines.map((l) => [l.type, l.attempt, l.error])).toEqual([
+      ['call', 1, undefined],
+      ['run', 1, 'the record had an unreadable line'],
+      ['call', 1, undefined],
+      ['run', 1, null],
+    ]);
+    expect(calls).toHaveLength(2);
+    expect(result).toEqual({ code: 5, spentUsd: 0.2, done: 1, failed: 1, left: 0, notApplicable: 0 });
+  });
+
+  it('appends the paid lines before the findings copy, and a failed copy is a failed run', async () => {
+    const s = setup();
+    mkdirSync(join(s.dir, 'records', 'findings', 'b3-a-pr418-d1-a1-find.json'), { recursive: true });
+    const result = await runBatch({ ...s.common, runs: [run()], spawnRun: stub([ok(0.1)]).spawnRun });
+    const lines = parseRecords(readFileSync(s.shared(3), 'utf8'));
+    expect(lines[0].usage.cost).toBe(0.1);
+    expect(lines[1].exit).toBe(0);
+    expect(lines[1].error).toMatch(/^findings copy failed: /);
+    expect(lines[1].findingsFile).toBe(null);
+    expect(result).toEqual({ code: 5, spentUsd: 0.1, done: 0, failed: 1, left: 0, notApplicable: 0 });
+  });
+
+  it('starts an append on a new line when the shared file does not end in one', async () => {
+    const s = setup();
+    mkdirSync(join(s.dir, 'records'), { recursive: true });
+    writeFileSync(s.shared(3), '{"type":"manual","usd":0.05}');
+    const result = await runBatch({ ...s.common, runs: [run()], spawnRun: stub([ok(0.1)]).spawnRun });
+    expect(parseRecords(readFileSync(s.shared(3), 'utf8')).map((l) => l.type)).toEqual(['manual', 'call', 'run']);
+    expect(result.spentUsd).toBe(0.15000000000000002);
+  });
+});
+
+describe('runBatch with an orphaned temp record', () => {
+  const meta = {
+    key: '3|find|a|418|1',
+    mode: 'find',
+    attempt: 1,
+    batch: 3,
+    label: 'a',
+    pr: '418',
+    draw: 1,
+    route: 'openrouter',
+    models: { find: 'm-find', verify: null },
+    expectFailure: false,
+  };
+
+  function orphan(s) {
+    mkdirSync(s.common.tmpDir, { recursive: true });
+    writeFileSync(join(s.common.tmpDir, 'dead.meta.json'), JSON.stringify(meta));
+    writeFileSync(join(s.common.tmpDir, 'dead.jsonl'), jsonl(callLine(0.3)));
+  }
+
+  it('adopts it before the first admit, so its spend counts', async () => {
+    const s = setup();
+    orphan(s);
+    const { spawnRun, calls } = stub([]);
+    const result = await runBatch({ ...s.common, ceilingUsd: 0.6, runs: [run({ draw: 2 })], spawnRun });
+    expect(calls).toHaveLength(0);
+    expect(result).toEqual({ code: 3, spentUsd: 0.3, done: 0, failed: 0, left: 1, notApplicable: 0 });
+    expect(parseRecords(readFileSync(s.shared(3), 'utf8'))).toMatchObject([
+      { type: 'call', key: '3|find|a|418|1', attempt: 1, requestedModel: 'm-find', findingsFile: null },
+      { type: 'run', key: '3|find|a|418|1', attempt: 1, exit: 1, error: 'the funnel stopped before this run was absorbed', findingsFile: null },
+    ]);
+  });
+
+  it('counts it once, however many invocations follow', async () => {
+    const s = setup();
+    orphan(s);
+    await runBatch({ ...s.common, ceilingUsd: 0.6, runs: [run({ draw: 2 })], spawnRun: stub([]).spawnRun });
+    const again = await runBatch({ ...s.common, ceilingUsd: 0.6, runs: [run({ draw: 2 })], spawnRun: stub([]).spawnRun });
+    expect(again.spentUsd).toBe(0.3);
+    expect(readdirSync(s.common.tmpDir).filter((name) => name.endsWith('.absorbed'))).toEqual(['dead.absorbed']);
+  });
+
+  it('leaves the files of an absorbed run alone', async () => {
+    const s = setup();
+    await runBatch({ ...s.common, runs: [run()], spawnRun: stub([ok(0.1)]).spawnRun });
+    const files = readdirSync(s.common.tmpDir);
+    expect(files.filter((name) => name.endsWith('.absorbed'))).toHaveLength(1);
+    expect(files.filter((name) => name.endsWith('.meta.json'))).toHaveLength(1);
+    expect(files.filter((name) => name.endsWith('.jsonl'))).toHaveLength(1);
+  });
+});
+
+describe('runBatch checks and warnings', () => {
+  it('scrubs only the provider keys, so another value in the keys file corrupts nothing', async () => {
+    const s = setup();
+    const result = await runBatch({ ...s.common, keys: { ...keys, FOO: '1' }, runs: [run()], spawnRun: stub([ok(0.1)]).spawnRun });
+    expect(result.code).toBe(0);
+    expect(parseRecords(readFileSync(s.shared(3), 'utf8'))[0].contentLength).toBe(10);
+  });
+
+  it('warns about a paid response with no usage', async () => {
+    const s = setup();
+    const record = jsonl(callLine(0.1, 'find', { usage: undefined }), runLine());
+    await runBatch({ ...s.common, runs: [run()], spawnRun: stub([ok(0.1, { record })]).spawnRun });
+    expect(s.out).toContain('warning: 1 call line(s) have no usage or no price; they count as 0 against the ceiling');
+  });
+
+  it('refuses with 2, naming the file and the line, when a shared record is broken', async () => {
+    const s = setup();
+    mkdirSync(join(s.dir, 'records'), { recursive: true });
+    writeFileSync(s.shared(1), '{"type":"manual","usd":1}\nnot json\n{"type":"manual","usd":1}\n');
+    const { spawnRun, calls } = stub([]);
+    const result = await runBatch({ ...s.common, runs: [run()], spawnRun });
+    expect(calls).toHaveLength(0);
+    expect(result).toEqual({ code: 2, spentUsd: 0, done: 0, failed: 0, left: 1, notApplicable: 0 });
+    expect(s.out).toHaveLength(1);
+    expect(s.out[0]).toMatch(/^batch-1\.jsonl: records: line 2 is not JSON/);
+  });
+});
+
+describe('runPreflight when a check fails', () => {
+  const pcatalog = {
+    corpus: ['344', '348', '352'],
+    prs: { 344: { head: null }, 348: { head: null }, 352: { head: null }, 418: { head: '584aa661' }, 930: { head: 'a5926a74' } },
+  };
+  const fine = 'Context budget: 0 file(s) sent as diff only.\n';
+  const answer = (code, stdout, stderr = '') => ({ code, stdout, stderr });
+  const byPr = (answers) => async (args) => answers[args[2]];
+
+  it('returns 5 and names the PR when a corpus PR crashed, without dropping it as a drop', async () => {
+    const answers = { 418: answer(0, fine), 344: answer(0, fine), 348: answer(1, '', 'x\ngh: network down\n'), 352: answer(0, fine), 930: answer(0, fine) };
+    expect(await runPreflight({ catalog: pcatalog, spawnRun: byPr(answers), repo: '/repo', base })).toEqual({
+      code: 5,
+      preflight: { corpus: ['344', '352'], recall930: true, reasons: {} },
+      failures: { 348: 'context check exited 1: x | gh: network down' },
+    });
+  });
+
+  it('returns 5 when a check printed no budget line', async () => {
+    const answers = { 418: answer(0, fine), 344: answer(0, fine), 348: answer(0, fine), 352: answer(0, fine), 930: answer(0, 'something else\n') };
+    const result = await runPreflight({ catalog: pcatalog, spawnRun: byPr(answers), repo: '/repo', base });
+    expect(result.code).toBe(5);
+    expect(result.failures).toEqual({ 930: 'context check printed no budget line' });
+  });
+
+  it('scrubs a key out of the stderr it passes on', async () => {
+    const answers = { 418: answer(1, '', `bad ${KEY}`), 344: answer(0, fine), 348: answer(0, fine), 352: answer(0, fine), 930: answer(0, fine) };
+    const result = await runPreflight({ catalog: pcatalog, spawnRun: byPr(answers), repo: '/repo', base, keys });
+    expect(result.failures).toEqual({ 418: 'context check exited 1: bad ***' });
   });
 });
