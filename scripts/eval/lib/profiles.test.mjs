@@ -241,9 +241,15 @@ describe('a row whose cost is unknown', () => {
     expect([cell.row.label, cell.preliminary, cell.note]).toEqual(['dark', true, 'production cost unknown: a call reported no usage']);
   });
 
-  it('sorts after a priced row in every profile, whatever its median', () => {
-    const picks = pickProfiles([unknown, priced], baseline);
-    expect([picks.best.anthropic.row.label, picks.balanced.anthropic.row.label, picks.value.anthropic.row.label]).toEqual(['lit', 'lit', 'lit']);
+  it('leads best of the best on its median over a priced 3/5, preliminary', () => {
+    const cell = pickProfiles([unknown, priced], baseline).best.anthropic;
+    expect([cell.row.label, cell.preliminary]).toEqual(['dark', true]);
+  });
+
+  it('sorts last where cost is compared', () => {
+    const close = row({ label: 'near', route: 'anthropic', medianPublished: 4, productionUsd: 9 });
+    const picks = pickProfiles([unknown, close], baseline);
+    expect([picks.balanced.anthropic.row.label, picks.value.anthropic.row.label]).toEqual(['near', 'near']);
   });
 });
 

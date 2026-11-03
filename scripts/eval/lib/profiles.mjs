@@ -69,8 +69,7 @@ export function pickProfiles(rows, baseline) {
   };
   const isBaseline = (row) => row.label === baseline.label && row.judge === baseline.judge;
   const notes = (...parts) => parts.filter((part) => part !== '').join('; ');
-  const pricedFirst = (a, b) => Number(a.costUnknown) - Number(b.costUnknown);
-  const byMeritThen930ThenCost = (a, b) => pricedFirst(a, b) || merit(b) - merit(a) || on930(b) - on930(a) || cost(a) - cost(b);
+  const byMeritThen930ThenCost = (a, b) => merit(b) - merit(a) || on930(b) - on930(a) || cost(a) - cost(b);
 
   for (const route of ROUTES) {
     const onRoute = rows.filter((r) => r.route === route && !r.generic);
