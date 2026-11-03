@@ -93,7 +93,7 @@ export function applyKey(anonScores, key) {
       scores[entry.label][1].corpus ??= {};
       scores[entry.label][1].corpus[entry.pr] = value;
     } else {
-      scores[entry.label][entry.draw] = { ...scores[entry.label][entry.draw], ...value };
+      scores[entry.label][entry.draw] = { ...scores[entry.label][entry.draw], ...value, pr: entry.pr };
     }
   }
   return scores;

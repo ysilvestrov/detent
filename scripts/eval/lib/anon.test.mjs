@@ -142,7 +142,7 @@ describe('judges', () => {
     const find = run({ batch: 1 });
     const { items, key } = anonymize({ runs: [find, verifyRun('judge-x', 'r1', 1)], read, shuffle: (list) => list });
     const scores = applyKey({ [items[0].id]: { findings: 1 }, [items[1].id]: { findings: 2 } }, key);
-    expect(scores).toEqual({ 'model-alpha': { 1: { findings: 1 } }, 'model-alpha@judge-x': { 1: { findings: 2 } } });
+    expect(scores).toEqual({ 'model-alpha': { 1: { findings: 1, pr: '895' } }, 'model-alpha@judge-x': { 1: { findings: 2, pr: '895' } } });
   });
 
   it('keeps the plain label for a find', () => {
@@ -161,12 +161,12 @@ describe('applyKey', () => {
   const key = { u1: { label: 'model-alpha', draw: 1, pr: '895', batch: 3, attempt: 1 } };
 
   it('maps the scores to label and draw', () => {
-    expect(applyKey({ u1: { defects: ['D1'], findings: 3 } }, key)).toEqual({ 'model-alpha': { 1: { defects: ['D1'], findings: 3 } } });
+    expect(applyKey({ u1: { defects: ['D1'], findings: 3 } }, key)).toEqual({ 'model-alpha': { 1: { defects: ['D1'], findings: 3, pr: '895' } } });
   });
 
   it('carries every field the grader gave', () => {
     expect(applyKey({ u1: { defects: [], findings: 1, corpus: { real: 1 } } }, key)).toEqual({
-      'model-alpha': { 1: { defects: [], findings: 1, corpus: { real: 1 } } },
+      'model-alpha': { 1: { defects: [], findings: 1, corpus: { real: 1 }, pr: '895' } },
     });
   });
 
@@ -188,7 +188,7 @@ describe('applyKey: corpus items', () => {
   it('treats batch 105 items of other PRs than 418 as corpus items and keeps its #418 items in the usual slot', () => {
     const key = { u1: entry('344', { batch: 105 }), u2: entry('418', { batch: 105 }) };
     expect(applyKey({ u1: { real: 2 }, u2: { defects: ['D1'], findings: 2 } }, key)).toEqual({
-      'model-alpha': { 1: { defects: ['D1'], findings: 2, corpus: { 344: { real: 2 } } } },
+      'model-alpha': { 1: { defects: ['D1'], findings: 2, corpus: { 344: { real: 2 } }, pr: '418' } },
     });
   });
 
