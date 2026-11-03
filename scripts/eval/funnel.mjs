@@ -90,15 +90,19 @@ async function batchCommand(args, prepared) {
 }
 
 async function preflightCommand(args) {
-  const { code, preflight } = await runPreflight({ catalog: readCatalog(), spawnRun, repo: args.repo });
-  mkdirSync(evalDir, { recursive: true });
-  writeFileSync(preflightFile, `${JSON.stringify(preflight, null, 2)}\n`);
-  say(JSON.stringify(preflight, null, 2));
+  const { code, preflight, failures } = await runPreflight({ catalog: readCatalog(), spawnRun, repo: args.repo });
+  say(JSON.stringify({ ...preflight, failures }, null, 2));
+  // Only a decided preflight is kept: a refusal or a failed check leaves no file for the later batches to accept.
+  if (code === 0) {
+    mkdirSync(evalDir, { recursive: true });
+    writeFileSync(preflightFile, `${JSON.stringify(preflight, null, 2)}\n`);
+  }
   return code;
 }
 
 async function endpointsCommand(args) {
   const catalog = JSON.parse(readFileSync(candidatesFile, 'utf8'));
+  const unfit = [];
   for (const cand of catalog.candidates) {
     if (cand.route !== 'openrouter' || (args.labels !== undefined && !args.labels.includes(cand.label))) continue;
     const response = await fetch(`https://openrouter.ai/api/v1/models/${cand.model}/endpoints`);
@@ -110,7 +114,7 @@ async function endpointsCommand(args) {
     const [maker] = cand.model.split('/');
     const chosen = chooseExecutor(VENDOR[maker] ?? maker, data.endpoints);
     if (chosen === null) {
-      say(`${cand.label}: no host fits the rule`);
+      unfit.push(cand.model);
       continue;
     }
     say(`${cand.label}: ${chosen.tag} ${JSON.stringify(chosen.price)}`);
@@ -118,7 +122,9 @@ async function endpointsCommand(args) {
     cand.price = chosen.price;
   }
   writeFileSync(candidatesFile, `${JSON.stringify(catalog, null, 2)}\n`);
-  return 0;
+  if (unfit.length === 0) return 0;
+  process.stderr.write(`no host fits the rule for ${unfit.join(', ')}; their pins in candidates.json are unchanged\n`);
+  return 2;
 }
 
 function noteSpendCommand(args) {
