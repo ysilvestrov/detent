@@ -134,8 +134,15 @@ describe('judges', () => {
   });
 
   it('keeps the plain label for a verify outside batch 104', () => {
-    const { key } = anonymize({ runs: [verifyRun('judge-x', 'r1', 7), verifyRun('judge-x', 'r2', 1)], read });
+    const { key } = anonymize({ runs: [verifyRun('judge-x', 'r1', 7), verifyRun('judge-x', 'r2', 7)], read });
     expect(Object.values(key).map((k) => k.label)).toEqual(['model-alpha', 'model-alpha']);
+  });
+
+  it('keeps the find and the verify of batch 1 apart through applyKey', () => {
+    const find = run({ batch: 1 });
+    const { items, key } = anonymize({ runs: [find, verifyRun('judge-x', 'r1', 1)], read, shuffle: (list) => list });
+    const scores = applyKey({ [items[0].id]: { findings: 1 }, [items[1].id]: { findings: 2 } }, key);
+    expect(scores).toEqual({ 'model-alpha': { 1: { findings: 1 } }, 'model-alpha@judge-x': { 1: { findings: 2 } } });
   });
 
   it('keeps the plain label for a find', () => {
