@@ -15,8 +15,10 @@ import type { OpenAiDeps } from './openai.js';
 import { PROVIDER_IDS, isProviderId, resolveModels, selectProvider, type Provider, type ProviderId } from './providers.js';
 import { openRecord, type RecordWriter, type RunLine } from './record.js';
 import { contextReader, filterReviewableFiles } from './review.js';
+import { checkFindingsPath, readFindings, saveFindings, type SavedFindings } from './saved-findings.js';
 import { ConfigError, loadSettings } from './settings.js';
-import { costUsd, formatCostLine } from './usage.js';
+import type { DroppedFinding, GatedFinding } from './types.js';
+import { EMPTY_USAGE, costUsd, formatCostLine, type Usage } from './usage.js';
 import { verifyAll } from './verify.js';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -94,6 +96,11 @@ export interface ReplayArgs {
   record?: string;
   /** Print the context budget and stop: no key, no model call. */
   contextOnly?: boolean;
+  /** Stop after the gate: find once and leave the findings in `saveFindings`. */
+  findOnly?: boolean;
+  saveFindings?: string;
+  /** Skip the find: verify the findings a find-only run saved, at the head and base it recorded. */
+  verifyFrom?: string;
 }
 
 /** The files that went to the model as a diff only, because their bodies did not fit. */
@@ -117,12 +124,15 @@ export function formatContextBudget(diffOnly: string[]): string {
 export function resolveReplayArgs(argv: readonly string[]): ReplayArgs {
   const positional: string[] = [];
   const values: Record<string, string> = {};
-  const flagsWithValue = ['--head', '--base', '--provider', '--record'];
+  const flagsWithValue = ['--head', '--base', '--provider', '--record', '--save-findings', '--verify-from'];
   const needs: Record<string, string> = {
     '--provider': `one of ${PROVIDER_IDS.join('|')}`,
     '--record': 'a file path',
+    '--save-findings': 'a file path',
+    '--verify-from': 'a file path',
   };
   let contextOnly = false;
+  let findOnly = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -135,6 +145,10 @@ export function resolveReplayArgs(argv: readonly string[]): ReplayArgs {
     }
     if (arg === '--context-only') {
       contextOnly = true;
+      continue;
+    }
+    if (arg === '--find-only') {
+      findOnly = true;
       continue;
     }
     // A mistyped `--head=abc` must not fall through and be taken for a positional argument.
@@ -151,6 +165,14 @@ export function resolveReplayArgs(argv: readonly string[]): ReplayArgs {
     throw new Error(`unknown provider "${provider}": one of ${PROVIDER_IDS.join('|')}`);
   }
   if (contextOnly && values['--record'] !== undefined) throw new Error('--context-only cannot be combined with --record');
+  if (contextOnly && findOnly) throw new Error('--context-only cannot be combined with --find-only');
+  for (const flag of ['--save-findings', '--verify-from']) {
+    if (contextOnly && values[flag] !== undefined) throw new Error(`--context-only cannot be combined with ${flag}`);
+  }
+  if (values['--verify-from'] !== undefined && (findOnly || values['--head'] || values['--base'])) {
+    throw new Error('--verify-from takes the head and the base from its file');
+  }
+  if (findOnly !== (values['--save-findings'] !== undefined)) throw new Error('--find-only needs --save-findings');
   return {
     pr,
     ...(values['--base'] ? { explicitBase: values['--base'] } : {}),
@@ -158,6 +180,9 @@ export function resolveReplayArgs(argv: readonly string[]): ReplayArgs {
     ...(provider !== undefined ? { provider: provider as ProviderId } : {}),
     ...(values['--record'] !== undefined ? { record: values['--record'] } : {}),
     ...(contextOnly ? { contextOnly } : {}),
+    ...(findOnly ? { findOnly } : {}),
+    ...(values['--save-findings'] !== undefined ? { saveFindings: values['--save-findings'] } : {}),
+    ...(values['--verify-from'] !== undefined ? { verifyFrom: values['--verify-from'] } : {}),
   };
 }
 
@@ -241,20 +266,41 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
     throw error;
   }
 
+  // The file comes first, before a provider is looked at: a file that is not this PR's, or not for these
+  // prompts, must not cost a key lookup, let alone a call.
+  let saved: SavedFindings | null = null;
+  if (args.verifyFrom !== undefined) {
+    try {
+      saved = readFindings(args.verifyFrom);
+    } catch (error) {
+      return usage(error instanceof Error ? error.message : String(error));
+    }
+    if (saved.pr !== args.pr) return usage(`${args.verifyFrom} holds the findings of PR #${saved.pr}, not PR #${args.pr}`);
+    if (saved.scope !== settings.scope) {
+      return usage(`${args.verifyFrom} was found under other prompts or settings than the ones in this working tree`);
+    }
+  }
+
   // `--context-only` never calls a model, so it needs neither a provider nor a key.
-  let chosen: { provider: Provider; apiKey: string; findModel: string; verifyModel: string } | null = null;
+  // `verifyModel` is null when the run stops before the verify stage.
+  let chosen: { provider: Provider; apiKey: string; findModel: string; verifyModel: string | null } | null = null;
   if (!args.contextOnly) {
     const selection = selectProvider(args.provider ?? settings.configured.provider, io.env);
     if (selection.kind === 'ambiguous') {
       return usage(`more than one provider key is set (${selection.keys.join(', ')}): pass --provider`);
     }
     if (selection.kind === 'no-key') return usage(`${selection.wanted} is not set`);
+    // A half run needs one model, and the provider may have no default for the other, so the model it
+    // does not use is filled in with a stand-in that is dropped below and never reaches a call, a record or the output.
+    const findCandidate = saved?.findModel ?? modelFromEnv(io.env, 'AI_REVIEW_MODEL') ?? settings.configured.findModel;
     const models = resolveModels(selection.provider, {
-      findModel: modelFromEnv(io.env, 'AI_REVIEW_MODEL') ?? settings.configured.findModel,
-      verifyModel: modelFromEnv(io.env, 'AI_REVIEW_VERIFY_MODEL') ?? settings.configured.verifyModel,
+      findModel: findCandidate,
+      verifyModel: args.findOnly
+        ? (findCandidate ?? 'unused')
+        : (modelFromEnv(io.env, 'AI_REVIEW_VERIFY_MODEL') ?? settings.configured.verifyModel),
     });
     if (!models.ok) return usage(models.error);
-    chosen = { provider: selection.provider, apiKey: selection.apiKey, findModel: models.find, verifyModel: models.verify };
+    chosen = { provider: selection.provider, apiKey: selection.apiKey, findModel: models.find, verifyModel: args.findOnly ? null : models.verify };
     // A pin is an OpenRouter request field; anywhere else it would be silently ignored, and the run would not be what was asked for.
     for (const name of ['AI_REVIEW_OPENROUTER_ONLY', 'AI_REVIEW_VERIFY_OPENROUTER_ONLY']) {
       if (parsePin(io.env[name]) !== null && selection.provider.id !== 'openrouter') {
@@ -265,7 +311,14 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
   const pins = { find: parsePin(io.env.AI_REVIEW_OPENROUTER_ONLY), verify: parsePin(io.env.AI_REVIEW_VERIFY_OPENROUTER_ONLY) };
   const cacheOff = io.env.AI_REVIEW_CACHE === 'off';
 
-  // Both checks come before the first call: a record that cannot be written must not be found out after the money is spent.
+  // These checks come before the first call: a file that cannot be written must not be found out after the money is spent.
+  if (args.saveFindings !== undefined) {
+    try {
+      checkFindingsPath(args.saveFindings);
+    } catch (error) {
+      return usage(`cannot open the findings file ${args.saveFindings}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   const runId = randomUUID();
   let rec: RecordWriter | null = null;
   let recordMeta: RecordMeta = { batch: null, label: null, draw: null };
@@ -309,123 +362,46 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
   const git = (a: string[]): string => sh(io.cwd, 'git', a);
   const gh = io.gh ?? ((a: string[]): string => sh(io.cwd, 'gh', a));
 
-  const execute = async (): Promise<number> => {
-    // `baseRefOid` is not exposed by every gh version, so the base is resolved from its branch name:
-    // for a squash-merged PR the head commit is not an ancestor of the base branch, so the merge-base is still the fork point.
-    const meta = JSON.parse(gh(['pr', 'view', pr, '--json', 'title,body,headRefOid,baseRefName'])) as {
-      title: string;
-      body: string | null;
-      headRefOid: string;
-      baseRefName: string;
+  // The request one stage sends. One hook per stage, so a call line says which stage paid for it.
+  const writer = rec;
+  const stageDeps = (stage: 'find' | 'verify', model: string, only: string[] | null): OpenAiDeps => {
+    // Present whenever a model is called: `--context-only` returns before any stage.
+    const { provider, apiKey } = chosen!;
+    return {
+      endpoint: provider.endpoint,
+      apiKey,
+      providerName: provider.name,
+      fetchFn: io.fetchFn,
+      ...(writer ? { onResponse: (info) => writer.call(stage, info) } : {}),
+      model,
+      extraBody: stageExtraBody({ provider, model, only: only?.join(','), cacheOff, cacheOffModels: io.env.AI_REVIEW_CACHE_OFF_MODELS }),
     };
+  };
 
-    const head = headOverride ?? meta.headRefOid;
-    state.head = head;
-    const hasCommit = (sha: string): boolean => {
-      try {
-        git(['cat-file', '-e', `${sha}^{commit}`]);
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    ensureHeadCommit({
-      pr,
-      head,
-      hasCommit,
-      fetchHead: () => {
-        // `refs/pull/<n>/head` tracks the PR's CURRENT head, so it cannot deliver a commit a later
-        // force-push made unreachable — and that is exactly the commit a recall probe asks for. GitHub
-        // still serves such a commit by sha, so ask for it by name. Only for an explicit `--head`.
-        try {
-          git(['fetch', 'origin', `pull/${pr}/head`]);
-        } catch (err) {
-          // With `--head` the pull ref is a best-effort first try; throwing here would bury the by-sha attempt.
-          if (!headOverride) throw err;
-        }
-        if (headOverride && !hasCommit(head)) git(['fetch', 'origin', head]);
-      },
-      log: (message) => io.err(message),
-    });
-
-    const mergeBase = resolveReplayBase({
-      explicit: explicitBase,
-      baseRefName: meta.baseRefName,
-      head,
-      mergeBase: (a, b) => git(['merge-base', a, b]).trim(),
-    });
-    state.base = mergeBase;
-    io.err(`replaying ${mergeBase}..${head}`);
-
-    const changed = git(['-c', 'core.quotePath=off', 'diff', '--name-only', `${mergeBase}..${head}`])
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const reviewable = filterReviewableFiles(changed, settings.patterns);
-    if (reviewable.length === 0) {
-      io.out('no reviewable files');
-      return EXIT.ok;
-    }
-
-    const diff = git(['-c', 'core.quotePath=off', 'diff', `${mergeBase}..${head}`, '--', ...reviewable]);
-    const readFile = (path: string): string | null => {
-      try {
-        return git(['show', `${head}:${path}`]);
-      } catch {
-        return null;
-      }
-    };
-
-    const { text: context, diffOnly } = buildReviewContext({
-      diff,
-      reviewable,
-      readFile: contextReader(readFile, settings.patterns),
-    });
-    state.diffOnly = diffOnly;
-    io.out(formatContextBudget(diffOnly));
-    if (args.contextOnly) return EXIT.ok;
-
-    // Present whenever a model is called: `--context-only` returned above.
-    const { provider, apiKey, findModel, verifyModel } = chosen!;
-    const transport = { endpoint: provider.endpoint, apiKey, providerName: provider.name, fetchFn: io.fetchFn };
-    const extraBody = (model: string, only: string[] | null): Record<string, unknown> | undefined =>
-      stageExtraBody({ provider, model, only: only?.join(','), cacheOff, cacheOffModels: io.env.AI_REVIEW_CACHE_OFF_MODELS });
-    // One hook per stage, so a call line says which stage paid for it.
-    const writer = rec;
-    const recording = (stage: 'find' | 'verify'): Pick<OpenAiDeps, 'onResponse'> =>
-      writer ? { onResponse: (info) => writer.call(stage, info) } : {};
-    const found = await runFind(
-      { ...transport, ...recording('find'), model: findModel, extraBody: extraBody(findModel, pins.find) },
-      { instructions: settings.findPrompt, context, prTitle: meta.title, prBody: meta.body ?? '' },
-    );
-    const raised = found.findings;
-    state.raised = raised.length;
-
-    const { kept, dropped } = applyGate({
-      findings: raised,
-      reviewable,
-      changed: changedLineRanges(diff),
+  // The verify stage and what a run prints, shared by a whole run and by `--verify-from`, so the two send the same request.
+  const verifyAndPrint = async (p: {
+    raised: number;
+    kept: GatedFinding[];
+    dropped: DroppedFinding[];
+    readFile: (path: string) => string | null;
+    findUsage: Usage;
+  }): Promise<number> => {
+    const { kept, dropped, readFile } = p;
+    const { findModel } = chosen!;
+    const verifyModel = chosen!.verifyModel!;
+    const verified = await verifyAll(stageDeps('verify', verifyModel, pins.verify), {
+      instructions: settings.verifyPrompt,
+      requests: kept.map((f, i) => ({
+        id: `f${i}`,
+        file: f.file,
+        matchedLine: f.matchedLine,
+        matchedEndLine: f.matchedEndLine,
+        quote: f.quote,
+        claim: f.claim,
+        why_it_breaks: f.why_it_breaks,
+      })),
       fileContent: readFile,
     });
-    state.gated = kept.length;
-    state.dropped = dropped.map((d) => ({ file: d.finding.file, reason: d.reason, claim: d.finding.claim }));
-
-    const verified = await verifyAll(
-      { ...transport, ...recording('verify'), model: verifyModel, extraBody: extraBody(verifyModel, pins.verify) },
-      {
-        instructions: settings.verifyPrompt,
-        requests: kept.map((f, i) => ({
-          id: `f${i}`,
-          file: f.file,
-          matchedLine: f.matchedLine,
-          matchedEndLine: f.matchedEndLine,
-          quote: f.quote,
-          claim: f.claim,
-          why_it_breaks: f.why_it_breaks,
-        })),
-        fileContent: readFile,
-      },
-    );
     const byId = new Map(kept.map((f, i) => [`f${i}`, f]));
     state.results = verified.results.map((r) => {
       const f = byId.get(r.id)!;
@@ -449,7 +425,7 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
       .map((r) => ({ finding: byId.get(r.id)!, verdict: r.verdict, evidence: r.evidence }));
 
     io.out(`\n=== PR #${pr} (${findModel} → ${verifyModel}) ===`);
-    io.out(`raised ${raised.length} → gated ${kept.length} → verified ${confirmed.length}\n`);
+    io.out(`raised ${p.raised} → gated ${kept.length} → verified ${confirmed.length}\n`);
     for (const d of dropped) io.out(`  [gate:${d.reason}] ${d.finding.file}: ${d.finding.claim}`);
     for (const r of rejected) io.out(`  [verify:${r.verdict}] ${r.finding.file}: ${r.finding.claim}`);
     for (const c of confirmed) {
@@ -458,11 +434,135 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
       io.out(`    evidence: ${c.evidence}`);
     }
 
-    const findUsd = costUsd(findModel, found.usage);
+    const findUsd = costUsd(findModel, p.findUsage);
     const verifyUsd = costUsd(verifyModel, verified.usage);
     const runUsd = findUsd === null || verifyUsd === null ? null : findUsd + verifyUsd;
-    io.out(`\n${formatCostLine({ find: found.usage, verify: verified.usage, runUsd, totalUsd: runUsd, unpriced: runUsd === null ? 1 : 0 })}`);
+    io.out(`\n${formatCostLine({ find: p.findUsage, verify: verified.usage, runUsd, totalUsd: runUsd, unpriced: runUsd === null ? 1 : 0 })}`);
     return EXIT.ok;
+  };
+
+  const execute = async (): Promise<number> => {
+    // `baseRefOid` is not exposed by every gh version, so the base is resolved from its branch name:
+    // for a squash-merged PR the head commit is not an ancestor of the base branch, so the merge-base is still the fork point.
+    // `--verify-from` has its head and base in the file and never asks GitHub.
+    const meta =
+      saved === null
+        ? (JSON.parse(gh(['pr', 'view', pr, '--json', 'title,body,headRefOid,baseRefName'])) as {
+            title: string;
+            body: string | null;
+            headRefOid: string;
+            baseRefName: string;
+          })
+        : null;
+
+    // A head named by the person, or by the file, is fetched by name when the pull ref cannot deliver it.
+    const namedHead = saved?.head ?? headOverride;
+    const head = namedHead ?? meta!.headRefOid;
+    state.head = head;
+    const hasCommit = (sha: string): boolean => {
+      try {
+        git(['cat-file', '-e', `${sha}^{commit}`]);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    ensureHeadCommit({
+      pr,
+      head,
+      hasCommit,
+      fetchHead: () => {
+        // `refs/pull/<n>/head` tracks the PR's CURRENT head, so it cannot deliver a commit a later
+        // force-push made unreachable — and that is exactly the commit a recall probe asks for. GitHub
+        // still serves such a commit by sha, so ask for it by name. Only for an explicit `--head`.
+        try {
+          git(['fetch', 'origin', `pull/${pr}/head`]);
+        } catch (err) {
+          // With a named head the pull ref is a best-effort first try; throwing here would bury the by-sha attempt.
+          if (!namedHead) throw err;
+        }
+        if (namedHead && !hasCommit(head)) git(['fetch', 'origin', head]);
+      },
+      log: (message) => io.err(message),
+    });
+
+    const mergeBase =
+      saved?.base ??
+      resolveReplayBase({
+        explicit: explicitBase,
+        baseRefName: meta!.baseRefName,
+        head,
+        mergeBase: (a, b) => git(['merge-base', a, b]).trim(),
+      });
+    state.base = mergeBase;
+    io.err(`replaying ${mergeBase}..${head}`);
+
+    const readFile = (path: string): string | null => {
+      try {
+        return git(['show', `${head}:${path}`]);
+      } catch {
+        return null;
+      }
+    };
+
+    // The find is already done: its findings and the gate's verdict on them are in the file.
+    if (saved !== null) {
+      state.raised = saved.raised.length;
+      state.gated = saved.kept.length;
+      state.dropped = saved.dropped.map((d) => ({ file: d.finding.file, reason: d.reason, claim: d.finding.claim }));
+      return verifyAndPrint({ raised: saved.raised.length, kept: saved.kept, dropped: saved.dropped, readFile, findUsage: EMPTY_USAGE });
+    }
+
+    const changed = git(['-c', 'core.quotePath=off', 'diff', '--name-only', `${mergeBase}..${head}`])
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const reviewable = filterReviewableFiles(changed, settings.patterns);
+    if (reviewable.length === 0) {
+      io.out('no reviewable files');
+      return EXIT.ok;
+    }
+
+    const diff = git(['-c', 'core.quotePath=off', 'diff', `${mergeBase}..${head}`, '--', ...reviewable]);
+    const { text: context, diffOnly } = buildReviewContext({
+      diff,
+      reviewable,
+      readFile: contextReader(readFile, settings.patterns),
+    });
+    state.diffOnly = diffOnly;
+    io.out(formatContextBudget(diffOnly));
+    if (args.contextOnly) return EXIT.ok;
+
+    const { findModel } = chosen!;
+    const found = await runFind(stageDeps('find', findModel, pins.find), {
+      instructions: settings.findPrompt,
+      context,
+      prTitle: meta!.title,
+      prBody: meta!.body ?? '',
+    });
+    const raised = found.findings;
+    state.raised = raised.length;
+
+    const { kept, dropped } = applyGate({
+      findings: raised,
+      reviewable,
+      changed: changedLineRanges(diff),
+      fileContent: readFile,
+    });
+    state.gated = kept.length;
+    state.dropped = dropped.map((d) => ({ file: d.finding.file, reason: d.reason, claim: d.finding.claim }));
+
+    if (args.findOnly) {
+      saveFindings(args.saveFindings!, { v: 1, pr, head, base: mergeBase, findModel, scope: settings.scope, raised, kept, dropped });
+      io.out(`\n=== PR #${pr} (${findModel}, find only) ===`);
+      io.out(`raised ${raised.length} → gated ${kept.length}`);
+      for (const d of dropped) io.out(`  [gate:${d.reason}] ${d.finding.file}: ${d.finding.claim}`);
+      const findUsd = costUsd(findModel, found.usage);
+      io.out(`\n${formatCostLine({ find: found.usage, verify: EMPTY_USAGE, runUsd: findUsd, totalUsd: findUsd, unpriced: findUsd === null ? 1 : 0 })}`);
+      return EXIT.ok;
+    }
+
+    return verifyAndPrint({ raised: raised.length, kept, dropped, readFile, findUsage: found.usage });
   };
 
   if (rec === null) return execute();

@@ -108,6 +108,46 @@ describe('resolveReplayArgs', () => {
       '--context-only cannot be combined with --record',
     );
   });
+
+  it('takes --find-only with --save-findings', () => {
+    expect(resolveReplayArgs(['418', '--find-only', '--save-findings', 'f.json'])).toEqual({
+      pr: '418',
+      findOnly: true,
+      saveFindings: 'f.json',
+    });
+  });
+
+  it('rejects --find-only without --save-findings', () => {
+    expect(() => resolveReplayArgs(['418', '--find-only'])).toThrow('--find-only needs --save-findings');
+  });
+
+  it('rejects --save-findings without --find-only', () => {
+    expect(() => resolveReplayArgs(['418', '--save-findings', 'f.json'])).toThrow('--find-only needs --save-findings');
+  });
+
+  it('rejects --save-findings with no path', () => {
+    expect(() => resolveReplayArgs(['418', '--find-only', '--save-findings'])).toThrow('--save-findings needs a file path');
+  });
+
+  it('takes --verify-from with a file path', () => {
+    expect(resolveReplayArgs(['418', '--verify-from', 'f.json'])).toEqual({ pr: '418', verifyFrom: 'f.json' });
+  });
+
+  it.each([['--find-only'], ['--head', 'abc'], ['--base', 'abc']])('rejects --verify-from together with %s', (...flag) => {
+    expect(() => resolveReplayArgs(['418', '--verify-from', 'f.json', ...flag])).toThrow(
+      '--verify-from takes the head and the base from its file',
+    );
+  });
+
+  it.each([
+    ['--find-only', ['--find-only']],
+    ['--save-findings', ['--save-findings', 'f.json']],
+    ['--verify-from', ['--verify-from', 'f.json']],
+  ])('rejects --context-only together with %s', (flag, extra) => {
+    expect(() => resolveReplayArgs(['418', '--context-only', ...extra])).toThrow(
+      `--context-only cannot be combined with ${flag}`,
+    );
+  });
 });
 
 describe('formatContextBudget', () => {

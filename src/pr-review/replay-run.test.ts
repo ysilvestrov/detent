@@ -1,10 +1,12 @@
 // `runReplay` end to end: a real git repository, a stubbed `gh` and a stubbed `fetch`. No model call leaves the machine.
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runReplay, type ReplayArgs, type ReplayIo } from './replay.js';
+import { readFindings } from './saved-findings.js';
+import { loadSettings } from './settings.js';
 
 const KEY = 'sk-test-key-0123456789';
 
@@ -249,5 +251,178 @@ describe('replay executor pinning', () => {
     await replay({}, { fetchFn });
 
     expect(Object.keys(bodyOf(bodies[0]!))).toEqual(['model', 'max_completion_tokens', 'response_format', 'messages']);
+  });
+});
+
+describe('replay find and verify as separate steps', () => {
+  const OPENROUTER = { OPENROUTER_API_KEY: KEY, AI_REVIEW_MODEL: 'f/model', AI_REVIEW_VERIFY_MODEL: 'v/model' };
+  const bodyOf = (raw: string): Record<string, any> => JSON.parse(raw) as Record<string, any>;
+  const tempFile = (name = 'f.json'): string => join(mkdtempSync(join(tmpdir(), 'detent-findings-')), name);
+  const scopeOf = (cwd: string): string =>
+    loadSettings((path) => {
+      try {
+        return readFileSync(join(cwd, path), 'utf8');
+      } catch {
+        return null;
+      }
+    }).scope;
+  type Result = { code: number; out: string[]; err: string[] };
+  type Run = (args: Omit<ReplayArgs, 'pr'> & { pr?: string }, p: { env?: ReplayIo['env']; fetchFn: typeof fetch }) => Promise<Result>;
+
+  /** Several runs over one repository: the head must be the same for a find and the verify that follows it. */
+  function inRepo(): { cwd: string; head: string; run: Run } {
+    const { cwd, head } = makeRepo();
+    const run: Run = async (args, p) => {
+      const out: string[] = [];
+      const err: string[] = [];
+      const code = await runReplay(
+        { pr: '418', ...args },
+        { cwd, env: p.env ?? { OPENAI_API_KEY: KEY }, out: (l) => out.push(l), err: (l) => err.push(l), fetchFn: p.fetchFn, gh: stubGh(head) },
+      );
+      return { code, out, err };
+    };
+    return { cwd, head, run };
+  }
+
+  it('find-only makes one call and saves what passed the gate', async () => {
+    const repo = inRepo();
+    const path = tempFile();
+    const { fetchFn, bodies } = makeFetch();
+    const { code, out } = await repo.run({ findOnly: true, saveFindings: path }, { fetchFn });
+
+    const saved = readFindings(path);
+    expect(code).toBe(0);
+    expect(bodies.map((b) => bodyOf(b).response_format.json_schema.name)).toEqual(['review_findings']);
+    expect(out).toContain('raised 1 → gated 1');
+    expect(saved).toMatchObject({ v: 1, pr: '418', head: repo.head, scope: scopeOf(repo.cwd) });
+    expect(saved.kept).toEqual([{ ...saved.raised[0]!, matchedLine: 2, matchedEndLine: 2 }]);
+    expect(saved.dropped).toEqual([]);
+  });
+
+  it('find-only works for a provider with no default verify model', async () => {
+    const path = tempFile();
+    const { fetchFn, bodies } = makeFetch();
+    const { code } = await replay(
+      { findOnly: true, saveFindings: path },
+      { fetchFn, env: { ANTHROPIC_API_KEY: KEY, AI_REVIEW_MODEL: 'claude-x' } },
+    );
+
+    expect(code).toBe(0);
+    expect(bodies).toHaveLength(1);
+    expect(readFindings(path).findModel).toBe('claude-x');
+  });
+
+  it('find-only leaves the stand-in verify model out of the record and the output', async () => {
+    const record = recordPath();
+    const { fetchFn } = makeFetch();
+    const { out } = await replay({ findOnly: true, saveFindings: tempFile(), record }, { fetchFn, env: OPENROUTER });
+
+    const lines = readRecord(record);
+    expect(lines.map((l) => (l.type === 'call' ? `call:${l.stage}` : l.type))).toEqual(['call:find', 'run']);
+    expect(lines[1]).toMatchObject({ findModel: 'f/model', verifyModel: null, results: [], raised: 1, gated: 1 });
+    expect(out.join('\n')).not.toContain('v/model');
+  });
+
+  it('find-only returns 2 before any model call when the findings file cannot be opened', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'detent-findings-'));
+    const { fetchFn, bodies } = makeFetch();
+    const { code } = await replay({ findOnly: true, saveFindings: folder }, { fetchFn });
+
+    expect(code).toBe(2);
+    expect(bodies).toEqual([]);
+  });
+
+  it('verify-from sends the same verify request as a whole run', async () => {
+    const repo = inRepo();
+    const whole = makeFetch();
+    await repo.run({}, { fetchFn: whole.fetchFn, env: OPENROUTER });
+    const path = tempFile();
+    await repo.run({ findOnly: true, saveFindings: path }, { fetchFn: makeFetch().fetchFn, env: OPENROUTER });
+    const split = makeFetch();
+    const { code } = await repo.run({ verifyFrom: path }, { fetchFn: split.fetchFn, env: OPENROUTER });
+
+    expect(code).toBe(0);
+    expect(split.bodies).toHaveLength(1);
+    expect(bodyOf(split.bodies[0]!)).toEqual(bodyOf(whole.bodies[1]!));
+  });
+
+  it('verify-from counts on another provider than the find', async () => {
+    const repo = inRepo();
+    const path = tempFile();
+    await repo.run({ findOnly: true, saveFindings: path }, { fetchFn: makeFetch().fetchFn, env: OPENROUTER });
+    const urls: string[] = [];
+    const inner = makeFetch().fetchFn;
+    const spy = (async (url: unknown, init?: RequestInit) => {
+      urls.push(String(url));
+      return inner(url as string, init);
+    }) as typeof fetch;
+    const { code } = await repo.run({ verifyFrom: path, provider: 'openai' }, { fetchFn: spy, env: { OPENAI_API_KEY: KEY } });
+
+    expect(code).toBe(0);
+    expect(urls).toHaveLength(1);
+    expect(new URL(urls[0]!).host).toBe('api.openai.com');
+  });
+
+  it('verify-from refuses another PR with code 2 and no model call', async () => {
+    const repo = inRepo();
+    const path = tempFile();
+    await repo.run({ findOnly: true, saveFindings: path }, { fetchFn: makeFetch().fetchFn });
+    const { fetchFn, bodies } = makeFetch();
+    const { code, err } = await repo.run({ verifyFrom: path, pr: '419' }, { fetchFn });
+
+    expect(code).toBe(2);
+    expect(err.join('\n')).toContain('PR #418');
+    expect(bodies).toEqual([]);
+  });
+
+  it('verify-from refuses another scope with code 2 and no model call', async () => {
+    const repo = inRepo();
+    const path = tempFile();
+    await repo.run({ findOnly: true, saveFindings: path }, { fetchFn: makeFetch().fetchFn });
+    mkdirSync(join(repo.cwd, '.detent', 'prompts'), { recursive: true });
+    writeFileSync(join(repo.cwd, '.detent', 'prompts', 'pr-review-verify.md'), 'Judge differently.\n');
+    const { fetchFn, bodies } = makeFetch();
+    const { code, err } = await repo.run({ verifyFrom: path }, { fetchFn });
+
+    expect(code).toBe(2);
+    expect(err.join('\n')).toContain('prompts or settings');
+    expect(bodies).toEqual([]);
+  });
+
+  it('verify-from refuses a broken file with code 2 and no model call', async () => {
+    const path = tempFile();
+    writeFileSync(path, JSON.stringify({ v: 1, pr: '418' }));
+    const { fetchFn, bodies } = makeFetch();
+    const { code, err } = await replay({ verifyFrom: path }, { fetchFn });
+
+    expect(code).toBe(2);
+    expect(err.join('\n')).toContain('field "head"');
+    expect(bodies).toEqual([]);
+  });
+
+  it('verify-from records verify calls and a run line with raised and gated from the file', async () => {
+    const repo = inRepo();
+    const path = tempFile();
+    await repo.run({ findOnly: true, saveFindings: path }, { fetchFn: makeFetch().fetchFn, env: OPENROUTER });
+    const record = recordPath();
+    const { code } = await repo.run({ verifyFrom: path, record }, { fetchFn: makeFetch().fetchFn, env: OPENROUTER });
+
+    const lines = readRecord(record);
+    const saved = readFindings(path);
+    expect(code).toBe(0);
+    expect(lines.map((l) => (l.type === 'call' ? `call:${l.stage}` : l.type))).toEqual(['call:verify', 'run']);
+    expect(lines[1]).toMatchObject({
+      exit: 0,
+      findModel: 'f/model',
+      verifyModel: 'v/model',
+      pr: '418',
+      head: saved.head,
+      base: saved.base,
+      raised: 1,
+      gated: 1,
+      dropped: [],
+      diffOnly: [],
+    });
+    expect(lines[1]!.results[0]).toMatchObject({ file: 'a.ts', line: 2, verdict: 'confirmed' });
   });
 });
