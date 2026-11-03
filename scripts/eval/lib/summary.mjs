@@ -5,13 +5,14 @@
 //   batch-<n>.json   {label: {draw: Score}}, as `applyKey` writes it. A Score is
 //                      {defects: string[], findings: number, pr?: string, corpus?: {pr: Corpus}}
 //                    `defects` are the ids D1-D5 the item found; `pr` defaults to "418" (set it to "930" for #930);
-//                    `corpus` is given instead of `defects` for corpus PRs, {real, false, unfalsifiable, published},
-//                    counts of the findings of one corpus PR, and sits on the label's draw 1 of batch 102, 103 or 105.
+//                    `corpus` is {pr: {real, false, unfalsifiable, published}}, counts of the findings of each corpus PR;
+//                    `applyKey` writes it on the label's draw 1 of batch 102, 103 or 105 from the grader's per-item fields.
+//                    Batch 105 (generic prompts) is its own row, `<baseline> (generic prompts)`, and is never a profile.
 //                    In batch 1 and 104 a verify is scored under `<label>@<judge>`, a find under the plain label.
 //   judges.json      {judgeModel: consensus}: how many of 15 the judge got right at `verify-corpus` by consensus.
 //
 // Which scores are which: find-stage D-scores are batches 1-6 under the plain label; published ones are batch 7 under
-// the plain label, batch 1 under `<label>@<judge>` and the `whole` batches 101, 105, 106 under the plain label.
+// the plain label, batch 1 under `<label>@<judge>` and the `whole` batches 101 and 106 under the plain label.
 // A score counts only if a run of that batch, label, draw and PR closed clean (`isScorable`).
 import { priceOf } from './catalog.mjs';
 import { callUsd, isScorable } from './records.mjs';
@@ -19,16 +20,22 @@ import { isUnstable } from './selection.mjs';
 
 const SEP = '|';
 const FIND_BATCHES = [1, 2, 3, 4, 5, 6];
-const PUBLISHED_BATCHES = [7, 101, 105, 106];
-const CORPUS_BATCHES = [102, 103, 105];
+const PUBLISHED_BATCHES = [7, 101, 106];
+const CORPUS_BATCHES = [102, 103];
+/** Batch 105 measures the baseline with generic prompts, so it is a row of its own and joins no other. */
+const GENERIC_BATCH = 105;
 /** Batches whose verify and whole runs do not belong to the label's own pair: the setup and the judges' comparison. */
 const OTHER_JUDGES_BATCHES = [0, 104];
 const DEFAULT_PR = '418';
 const BROKEN_FINISH = ['length', 'content_filter', 'error'];
 
+/** A call of the setup's verify probe (batch 0) or of the judges' comparison (batch 104): not part of the pair's own runs. */
+const isOtherJudgesCall = (call) => batchOf(call) === 104 || (batchOf(call) === 0 && call.stage === 'verify');
+
 const keyParts = (line) => (typeof line.key === 'string' ? line.key.split(SEP) : []);
 /** The label of a record line; a call line has none of its own, only the key of its run. */
 const labelOf = (line) => keyParts(line)[2] ?? line.label;
+const batchOf = (line) => line.batch ?? Number(keyParts(line)[0]);
 
 export function median(xs) {
   if (xs.length === 0) return null;
@@ -126,17 +133,21 @@ function scoredDraws({ scores, closed, batch, scoreLabel, label }) {
 export function summarize({ lines, catalog, scores, cacheRuleApplies }) {
   const base = catalog.baseline;
   const entries = [
-    { label: base.label, findModel: base.findModel, route: base.route },
-    ...catalog.candidates.map((c) => ({ label: c.label, findModel: c.model, route: c.route })),
+    { label: base.label, findModel: base.findModel, route: base.route, generic: false },
+    ...catalog.candidates.map((c) => ({ label: c.label, findModel: c.model, route: c.route, generic: false })),
+    { label: base.label, findModel: base.findModel, route: base.route, generic: true },
   ];
   const closed = closedRuns(lines);
   const rows = entries.map((entry) => {
-    const { label } = entry;
-    const calls = lines.filter((l) => l.type === 'call' && labelOf(l) === label);
-    const runs = lines.filter((l) => l.type === 'run' && l.label === label);
+    const { label, generic } = entry;
+    const own = lines.filter((l) => (batchOf(l) === GENERIC_BATCH) === generic);
+    const calls = own.filter((l) => l.type === 'call' && labelOf(l) === label);
+    const runs = own.filter((l) => l.type === 'run' && l.label === label);
+    const publishedBatches = generic ? [GENERIC_BATCH] : PUBLISHED_BATCHES;
+    const corpusBatches = generic ? [GENERIC_BATCH] : CORPUS_BATCHES;
 
     const findByDraw = new Map();
-    for (const batch of FIND_BATCHES) {
+    for (const batch of generic ? [] : FIND_BATCHES) {
       for (const e of scoredDraws({ scores, closed, batch, scoreLabel: label, label })) {
         if (e.pr === DEFAULT_PR) findByDraw.set(e.draw, e.value);
       }
@@ -145,16 +156,16 @@ export function summarize({ lines, catalog, scores, cacheRuleApplies }) {
     const perDraw = draws.map((d) => findByDraw.get(d).defects.length);
     const union = new Set(draws.flatMap((d) => findByDraw.get(d).defects)).size;
 
-    const atJudge = Object.keys(scores.batches[1] ?? {}).filter((k) => k.startsWith(`${label}@`));
+    const atJudge = Object.keys(generic ? {} : scores.batches[1] ?? {}).filter((k) => k.startsWith(`${label}@`));
     const published = [
       ...atJudge.flatMap((scoreLabel) => scoredDraws({ scores, closed, batch: 1, scoreLabel, label })),
-      ...PUBLISHED_BATCHES.flatMap((batch) => scoredDraws({ scores, closed, batch, scoreLabel: label, label })),
-    ];
+      ...publishedBatches.flatMap((batch) => scoredDraws({ scores, closed, batch, scoreLabel: label, label })),
+    ].filter((e) => Array.isArray(e.value.defects));
     const publishedOn = (pr) => published.filter((e) => e.pr === pr).map((e) => e.value.defects.length);
 
     const corpus = { real: 0, false: 0, unfalsifiable: 0, published: 0, prs: 0 };
     const counted = new Set();
-    for (const batch of CORPUS_BATCHES) {
+    for (const batch of corpusBatches) {
       for (const [draw, value] of Object.entries(scores.batches[batch]?.[label] ?? {})) {
         for (const [pr, c] of Object.entries(value.corpus ?? {})) {
           if (counted.has(pr) || !closed.has(closedKey(batch, label, Number(draw), pr))) continue;
@@ -174,11 +185,12 @@ export function summarize({ lines, catalog, scores, cacheRuleApplies }) {
     const verdicts = verifies.flatMap((r) => r.results.map((x) => x.verdict));
     const refutedPerRun = verifies.filter(isScorable).map((r) => r.results.filter((x) => x.verdict === 'refuted').length);
     const judge = verifies.find(isScorable)?.verifyModel ?? base.verifyModel;
-    const hasVerify = lines.some((l) => l.type === 'run' && l.label === label && ['verify', 'whole'].includes(l.mode) && isScorable(l) && !l.expectFailure);
+    const hasVerify = own.some((l) => l.type === 'run' && l.label === label && ['verify', 'whole'].includes(l.mode) && isScorable(l) && !l.expectFailure);
 
     const pair = `${entry.findModel} + ${judge}`;
     return {
-      label,
+      label: generic ? `${label} (generic prompts)` : label,
+      generic,
       route: entry.route,
       pair,
       draws: draws.length,
@@ -189,12 +201,12 @@ export function summarize({ lines, catalog, scores, cacheRuleApplies }) {
       refutedMean: mean(refutedPerRun),
       errorShare: verdicts.length === 0 ? null : verdicts.filter((v) => v === 'error').length / verdicts.length,
       paidUsd: paidUsd(calls, catalog),
-      productionUsd: firstRunUsd({ lines, catalog, label, cacheRuleApplies }),
+      productionUsd: firstRunUsd({ lines: own, catalog, label, cacheRuleApplies }),
       composite: !hasVerify,
       unstable: draws.length >= 2 && isUnstable(Object.fromEntries(draws.map((d) => [d, findByDraw.get(d)]))),
       corpus,
       judgeConsensus: scores.judges?.[judge] ?? null,
-      brokenCalls: calls.filter((c) => c.contentLength === 0 || BROKEN_FINISH.includes(c.finishReason)).length,
+      brokenCalls: calls.filter((c) => !isOtherJudgesCall(c) && (c.contentLength === 0 || BROKEN_FINISH.includes(c.finishReason))).length,
       medianRecall930: median(publishedOn('930')),
       seen: calls.length > 0 || runs.length > 0 || draws.length > 0 || published.length > 0,
     };

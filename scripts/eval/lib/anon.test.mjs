@@ -174,3 +174,26 @@ describe('applyKey', () => {
     expect(() => applyKey({ nope: { defects: [], findings: 0 } }, key)).toThrow('nope');
   });
 });
+
+describe('applyKey: corpus items', () => {
+  const entry = (pr, over = {}) => ({ label: 'model-alpha', draw: 1, pr, batch: 102, attempt: 1, ...over });
+
+  it('puts the items of the corpus PRs of one label under draw 1 by PR', () => {
+    const key = { u1: entry('344'), u2: entry('348') };
+    expect(applyKey({ u1: { real: 2, false: 0 }, u2: { real: 1, false: 1 } }, key)).toEqual({
+      'model-alpha': { 1: { corpus: { 344: { real: 2, false: 0 }, 348: { real: 1, false: 1 } } } },
+    });
+  });
+
+  it('treats batch 105 items of other PRs than 418 as corpus items and keeps its #418 items in the usual slot', () => {
+    const key = { u1: entry('344', { batch: 105 }), u2: entry('418', { batch: 105 }) };
+    expect(applyKey({ u1: { real: 2 }, u2: { defects: ['D1'], findings: 2 } }, key)).toEqual({
+      'model-alpha': { 1: { defects: ['D1'], findings: 2, corpus: { 344: { real: 2 } } } },
+    });
+  });
+
+  it('throws naming both ids when two ids land on one label and corpus PR', () => {
+    const key = { u1: entry('344'), u2: entry('344') };
+    expect(() => applyKey({ u1: { real: 1 }, u2: { real: 2 } }, key)).toThrow('u1 and u2');
+  });
+});

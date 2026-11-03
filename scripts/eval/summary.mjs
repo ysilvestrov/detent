@@ -109,6 +109,7 @@ function main(argv) {
   const out = [];
   out.push(`# Selection report, batches from ${args.batchFrom}`, '', `Cache rule applies: ${args.cacheRuleApplies ? 'yes' : 'no'}`, '', '## Configs', '');
   out.push(...configTable(rows));
+  out.push('', 'The judge cost of composite rows is not included: it needs the tokens of gpt-5.5 on verify-corpus, which are in the verify-corpus output, not in the records.');
   out.push('', '## Profile candidates');
   out.push(...(baselineRow === undefined ? ['', 'No baseline row yet, so no candidates.'] : profileTables(rows, baselineRow)));
   out.push('', '## Admission', '');

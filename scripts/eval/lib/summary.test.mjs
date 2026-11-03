@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { anonymize, applyKey } from './anon.mjs';
 import { anthropicThinking, cacheFields, median, paidByRoute, paidUsd, productionUsd, summarize } from './summary.mjs';
 
 const catalog = {
@@ -247,5 +248,53 @@ describe('cacheFields', () => {
       { usage: {} },
     ];
     expect(cacheFields(calls)).toEqual({ cached_tokens: 30, cache_write_tokens: 7 });
+  });
+});
+
+describe('summarize: what the anonymizer writes', () => {
+  it('reads the corpus scores of real anonymize and applyKey output of batch 102', () => {
+    const runs = ['344', '348', '352'].map((pr) => run({ batch: 102, mode: 'whole', pr, draw: 1, head: 'h', key: `102|whole|alpha|${pr}|1` }));
+    const { items, key } = anonymize({ runs, read: () => ({ kept: [] }), shuffle: (list) => list });
+    const grader = Object.fromEntries(items.map((item) => [item.id, { real: 1, false: 0, unfalsifiable: 0, published: 1 }]));
+    const scores = { batches: { 102: applyKey(grader, key) }, judges: {} };
+    const row = rowOf(summarize({ lines: runs, catalog, scores, cacheRuleApplies: false }), 'alpha');
+    expect(row.corpus).toEqual({ real: 3, false: 0, unfalsifiable: 0, published: 3, prs: 3 });
+  });
+});
+
+describe('summarize: batch 105 is the generic-prompts row', () => {
+  const lines = [
+    run({ label: 'base', batch: 2, draw: 1, key: '2|find|base|418|1' }),
+    run({ label: 'base', batch: 105, mode: 'whole', draw: 1, key: '105|whole|base|418|1' }),
+    run({ label: 'base', batch: 105, mode: 'whole', pr: '344', draw: 1, key: '105|whole|base|344|1' }),
+    call({ key: '105|whole|base|418|1', usage: { prompt_tokens: 1, completion_tokens: 1, cost: 0.75 } }),
+  ];
+  const corpus = { 344: { real: 2, false: 0, unfalsifiable: 0, published: 2 } };
+  const scores = {
+    batches: { 2: { base: { 1: score(['D1']) } }, 105: { base: { 1: score(['D1', 'D2', 'D3'], { corpus }) } } },
+    judges: {},
+  };
+  const rows = summarize({ lines, catalog, scores, cacheRuleApplies: false });
+
+  it('leaves the baseline row as it is without batch 105', () => {
+    const row = rowOf(rows, 'base');
+    expect([row.medianPublished, row.corpus.prs, row.paidUsd, row.generic]).toEqual([null, 0, 0, false]);
+  });
+
+  it('gives batch 105 its own row', () => {
+    const row = rowOf(rows, 'base (generic prompts)');
+    expect([row.medianPublished, row.corpus.prs, row.paidUsd, row.generic]).toEqual([3, 1, 0.75, true]);
+  });
+});
+
+describe('summarize: broken calls', () => {
+  it('skips the verify probe of batch 0 and every call of batch 104', () => {
+    const lines = [
+      call({ key: '0|verify|alpha|688|1|gpt-5.5', stage: 'verify', contentLength: 0 }),
+      call({ key: '104|verify|alpha|418|1|judge-x', stage: 'verify', contentLength: 0 }),
+      call({ key: '2|find|alpha|418|1', contentLength: 0 }),
+      call({ key: '0|find|alpha|895|1', contentLength: 0 }),
+    ];
+    expect(rowOf(summarize({ lines, catalog, scores: noScores, cacheRuleApplies: false }), 'alpha').brokenCalls).toBe(2);
   });
 });
