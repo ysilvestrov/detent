@@ -85,9 +85,26 @@ describe('callUsd', () => {
     const line = { type: 'call', model: 'ghost', usage: { prompt_tokens: 10, completion_tokens: 10 } };
     expect(callUsd(line, catalog)).toEqual({ usd: 0, source: 'unpriced' });
   });
+
+  it('is unpriced for a usage object with no token fields', () => {
+    expect(callUsd({ type: 'call', model: 'plain-model', usage: {} }, catalog)).toEqual({ usd: 0, source: 'unpriced' });
+  });
+
+  it('is unpriced for a usage object missing the output tokens', () => {
+    expect(callUsd({ type: 'call', model: 'plain-model', usage: { prompt_tokens: 10 } }, catalog)).toEqual({ usd: 0, source: 'unpriced' });
+  });
 });
 
 describe('totalSpend', () => {
+  it('stays a number with a call whose usage is empty', () => {
+    const lines = [{ type: 'call', model: 'plain-model', usage: {} }, { type: 'manual', usd: 1, reason: 'judge' }];
+    expect(totalSpend(lines, catalog)).toEqual({ usd: 1, unpriced: 1 });
+  });
+
+  it('counts a manual line with no finite usd as unpriced', () => {
+    expect(totalSpend([{ type: 'manual', reason: 'judge' }, { type: 'manual', usd: 'two' }, { type: 'manual', usd: 2 }], catalog)).toEqual({ usd: 2, unpriced: 2 });
+  });
+
   it('counts the calls of a run with no run line, the manual lines and the unpriced calls', () => {
     const lines = [
       { type: 'call', runId: 'a', model: 'plain-model', usage: { prompt_tokens: 250000, completion_tokens: 0 } },

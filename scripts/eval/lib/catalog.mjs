@@ -36,6 +36,16 @@ export function loadCatalog(text) {
     if (cand.only !== null && !(Array.isArray(cand.only) && cand.only.every(isText))) fail(`${at}.only`);
     if (!TIERS.includes(cand.tier)) fail(`${at}.tier`);
     checkPrice(cand.price, `${at}.price`);
+    if (cand.dropped !== undefined && !isText(cand.dropped)) fail(`${at}.dropped`);
+  });
+
+  if (!Array.isArray(c.judges)) fail('judges');
+  c.judges.forEach((judge, i) => {
+    const at = `judges[${i}]`;
+    if (!isObject(judge)) fail(at);
+    if (!isText(judge.model)) fail(`${at}.model`);
+    if (judge.only !== null && !(Array.isArray(judge.only) && judge.only.every(isText))) fail(`${at}.only`);
+    checkPrice(judge.price, `${at}.price`);
   });
 
   if (!isObject(c.prices)) fail('prices');
@@ -59,6 +69,7 @@ export function loadCatalog(text) {
 export function priceOf(catalog, model) {
   const known = { ...catalog.prices };
   for (const cand of catalog.candidates) known[cand.model] = cand.price;
+  for (const judge of catalog.judges ?? []) known[judge.model] = judge.price;
   if (Object.hasOwn(known, model)) return known[model];
   const ids = Object.keys(known)
     .filter((id) => model.startsWith(id))

@@ -241,14 +241,26 @@
       "note": "best of the best only"
     }
   ],
+  "judges": [
+    {
+      "model": "openai/gpt-5.5",
+      "only": null,
+      "price": {
+        "input": 5,
+        "output": 30
+      }
+    }
+  ],
   "prices": {
     "gpt-5.6-sol": {
       "input": 4,
+      "cachedInput": 0.4,
       "cacheWrite": 5,
       "output": 20
     },
     "gpt-5.5": {
       "input": 5,
+      "cachedInput": 0.5,
       "output": 30
     }
   },

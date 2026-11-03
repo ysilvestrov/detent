@@ -25,8 +25,33 @@ describe('parseArgs', () => {
 
   it('reads the other commands', () => {
     expect(parseArgs(['--preflight'], '/h')).toEqual({ command: 'preflight', repo: join('/h', 'projects', 'warsaw-beer-bot') });
-    expect(parseArgs(['--endpoints'], '/h')).toEqual({ command: 'endpoints', labels: undefined });
+    expect(parseArgs(['--endpoints'], '/h')).toEqual({ command: 'endpoints', labels: undefined, excludeHost: undefined });
     expect(parseArgs(['--note-spend', '1.5', '--reason', 'verify-corpus'], '/h')).toEqual({ command: 'note-spend', usd: 1.5, reason: 'verify-corpus' });
+  });
+
+  it('reads the retry of --endpoints', () => {
+    expect(parseArgs(['--endpoints', '--labels', 'a,b', '--exclude-host', 'alibaba'], '/h')).toEqual({ command: 'endpoints', labels: ['a', 'b'], excludeHost: 'alibaba' });
+  });
+
+  it.each([
+    [['--batch', '4', '--keys', 'k', '--ceiling', '1', '--detent', '/d', '--out-root', '/o']],
+    [['--preflight', '--detent', '/d', '--out-root', '/o']],
+    [['--endpoints', '--detent', '/d', '--out-root', '/o']],
+    [['--note-spend', '1', '--reason', 'r', '--detent', '/d', '--out-root', '/o']],
+  ])('takes the detent path and the output root on %j', (argv) => {
+    expect(parseArgs(argv, '/h')).toMatchObject({ detent: '/d', outRoot: '/o' });
+  });
+
+  it.each([0, 1, 2, 3, 5, 102, 105])('refuses --labels on batch %i, which ignores them', (batch) => {
+    expect(() => parseArgs(['--batch', String(batch), '--keys', 'k', '--ceiling', '1', '--labels', 'a'], '/h')).toThrow(`batch ${batch} ignores --labels`);
+  });
+
+  it.each([4, 6, 7, 101, 103, 104, 106])('takes --labels on batch %i', (batch) => {
+    expect(parseArgs(['--batch', String(batch), '--keys', 'k', '--ceiling', '1', '--labels', 'a'], '/h').labels).toEqual(['a']);
+  });
+
+  it('refuses --exclude-host outside --endpoints', () => {
+    expect(() => parseArgs(['--batch', '4', '--keys', 'k', '--ceiling', '1', '--exclude-host', 'x'], '/h')).toThrow('--exclude-host goes with --endpoints');
   });
 
   it.each([
