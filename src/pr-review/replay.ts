@@ -177,6 +177,36 @@ const modelFromEnv = (env: Env, name: string): string | undefined => {
   return value === undefined || value === '' ? undefined : value;
 };
 
+/** The comma-separated names in a pin variable. Null when it is unset or blank. */
+function parsePin(raw: string | undefined): string[] | null {
+  const names = (raw ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  return names.length === 0 ? null : names;
+}
+
+/**
+ * The extra request fields one stage sends: the provider's own, the OpenRouter executor pin, and the
+ * switch that turns cache writes off. The switch touches only models named in `cacheOffModels`, because
+ * Azure answers `gpt-5.5` with a 400 on `prompt_cache_options` (spec 2026-11-03-pr-review-big-test-design.md, «Кеш»).
+ */
+export function stageExtraBody(p: {
+  provider: Provider;
+  model: string;
+  only: string | undefined;
+  cacheOff: boolean;
+  cacheOffModels: string | undefined;
+}): Record<string, unknown> | undefined {
+  const only = parsePin(p.only);
+  const offModels = (p.cacheOffModels ?? '').split(',').map((s) => s.trim());
+  const cacheOff = p.cacheOff && offModels.includes(p.model);
+  if (only === null && !cacheOff) return p.provider.extraBody;
+  const body: Record<string, unknown> = { ...p.provider.extraBody };
+  if (only !== null) {
+    body.provider = { ...(p.provider.extraBody?.provider as object | undefined), only, allow_fallbacks: false };
+  }
+  if (cacheOff) body.prompt_cache_options = { mode: 'explicit' };
+  return body;
+}
+
 type RecordMeta = Pick<RunLine, 'batch' | 'label' | 'draw'>;
 
 /** `AI_REVIEW_RECORD_META` is a JSON object; a field it leaves out is null. Null when it is anything else. */
@@ -225,7 +255,15 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
     });
     if (!models.ok) return usage(models.error);
     chosen = { provider: selection.provider, apiKey: selection.apiKey, findModel: models.find, verifyModel: models.verify };
+    // A pin is an OpenRouter request field; anywhere else it would be silently ignored, and the run would not be what was asked for.
+    for (const name of ['AI_REVIEW_OPENROUTER_ONLY', 'AI_REVIEW_VERIFY_OPENROUTER_ONLY']) {
+      if (parsePin(io.env[name]) !== null && selection.provider.id !== 'openrouter') {
+        return usage(`${name} works only with the openrouter provider, not ${selection.provider.id}`);
+      }
+    }
   }
+  const pins = { find: parsePin(io.env.AI_REVIEW_OPENROUTER_ONLY), verify: parsePin(io.env.AI_REVIEW_VERIFY_OPENROUTER_ONLY) };
+  const cacheOff = io.env.AI_REVIEW_CACHE === 'off';
 
   // Both checks come before the first call: a record that cannot be written must not be found out after the money is spent.
   const runId = randomUUID();
@@ -258,8 +296,8 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
     provider: chosen?.provider.id ?? null,
     findModel: chosen?.findModel ?? null,
     verifyModel: chosen?.verifyModel ?? null,
-    only: { find: null, verify: null },
-    cacheMode: 'default',
+    only: chosen === null ? { find: null, verify: null } : pins,
+    cacheMode: cacheOff ? 'off' : 'default',
     pr: args.pr,
     startedAt,
     ...state,
@@ -349,13 +387,15 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
 
     // Present whenever a model is called: `--context-only` returned above.
     const { provider, apiKey, findModel, verifyModel } = chosen!;
-    const transport = { endpoint: provider.endpoint, apiKey, providerName: provider.name, extraBody: provider.extraBody, fetchFn: io.fetchFn };
+    const transport = { endpoint: provider.endpoint, apiKey, providerName: provider.name, fetchFn: io.fetchFn };
+    const extraBody = (model: string, only: string[] | null): Record<string, unknown> | undefined =>
+      stageExtraBody({ provider, model, only: only?.join(','), cacheOff, cacheOffModels: io.env.AI_REVIEW_CACHE_OFF_MODELS });
     // One hook per stage, so a call line says which stage paid for it.
     const writer = rec;
     const recording = (stage: 'find' | 'verify'): Pick<OpenAiDeps, 'onResponse'> =>
       writer ? { onResponse: (info) => writer.call(stage, info) } : {};
     const found = await runFind(
-      { ...transport, ...recording('find'), model: findModel },
+      { ...transport, ...recording('find'), model: findModel, extraBody: extraBody(findModel, pins.find) },
       { instructions: settings.findPrompt, context, prTitle: meta.title, prBody: meta.body ?? '' },
     );
     const raised = found.findings;
@@ -371,7 +411,7 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
     state.dropped = dropped.map((d) => ({ file: d.finding.file, reason: d.reason, claim: d.finding.claim }));
 
     const verified = await verifyAll(
-      { ...transport, ...recording('verify'), model: verifyModel },
+      { ...transport, ...recording('verify'), model: verifyModel, extraBody: extraBody(verifyModel, pins.verify) },
       {
         instructions: settings.verifyPrompt,
         requests: kept.map((f, i) => ({
