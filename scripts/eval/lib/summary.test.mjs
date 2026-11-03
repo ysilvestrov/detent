@@ -298,3 +298,13 @@ describe('summarize: broken calls', () => {
     expect(rowOf(summarize({ lines, catalog, scores: noScores, cacheRuleApplies: false }), 'alpha').brokenCalls).toBe(2);
   });
 });
+
+describe('summarize: the PR comes from the key', () => {
+  it('reads a batch 101 #930 score as #930 even when the grader wrote another PR', () => {
+    const runs = [run({ batch: 101, mode: 'whole', pr: '930', draw: 1, head: 'h', key: '101|whole|alpha|930|1' })];
+    const { items, key } = anonymize({ runs, read: () => ({ kept: [] }), shuffle: (list) => list });
+    const grader = { [items[0].id]: { defects: ['D1', 'D2'], findings: 3, pr: '418' } };
+    const row = rowOf(summarize({ lines: runs, catalog, scores: { batches: { 101: applyKey(grader, key) }, judges: {} }, cacheRuleApplies: false }), 'alpha');
+    expect([row.medianRecall930, row.medianPublished]).toEqual([2, null]);
+  });
+});
