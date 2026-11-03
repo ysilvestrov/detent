@@ -377,8 +377,10 @@ interface**: pin the exact version of the package if you import it.
   the review. The numbers above come from the default OpenAI pair. A model outside the price table,
   and any `openai/…` name on OpenRouter, shows tokens without dollars. Anthropic ignores
   `reasoning_effort`. The price on OpenRouter depends on the route.
-- **Cache writes are not counted.** The vendor page prices them separately for the `gpt-5.6` models,
-  and the spend line has no such column: check it against the bill.
+- **Cache writes are not counted, so the spend line reads low on `gpt-5.6` models.** On a live run
+  all 18.6k input tokens of `gpt-5.6-sol` showed as 30-minute cache writes in the OpenAI dashboard.
+  Its page prices those at $5 per 1M, the table at the $4 input price: on that run $0.22 instead of
+  about $0.23. `gpt-5.5` has no such tariff, and its tokens showed as uncached.
 - **`.gitattributes`.** A PR that adds `* -diff` hides its diff from the reviewer, and the review
   comes out clean. The change to `.gitattributes` is visible in the PR.
 - **Rare cases carried over on purpose**, listed in the spec
