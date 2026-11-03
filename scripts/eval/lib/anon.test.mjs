@@ -141,8 +141,8 @@ describe('judges', () => {
   it('keeps the find and the verify of batch 1 apart through applyKey', () => {
     const find = run({ batch: 1 });
     const { items, key } = anonymize({ runs: [find, verifyRun('judge-x', 'r1', 1)], read, shuffle: (list) => list });
-    const scores = applyKey({ [items[0].id]: { findings: 1 }, [items[1].id]: { findings: 2 } }, key);
-    expect(scores).toEqual({ 'model-alpha': { 1: { findings: 1, pr: '895' } }, 'model-alpha@judge-x': { 1: { findings: 2, pr: '895' } } });
+    const scores = applyKey({ [items[0].id]: { defects: [], findings: 1 }, [items[1].id]: { defects: [], findings: 2 } }, key);
+    expect(scores).toEqual({ 'model-alpha': { 1: { defects: [], findings: 1, pr: '895' } }, 'model-alpha@judge-x': { 1: { defects: [], findings: 2, pr: '895' } } });
   });
 
   it('keys two judges of one finder apart in the whole runs of batch 106', () => {
@@ -166,7 +166,7 @@ describe('judges', () => {
 describe('applyKey', () => {
   it('throws naming both ids when two ids land on one label and draw', () => {
     const twin = { label: 'model-alpha', draw: 1, pr: '895', batch: 3, attempt: 1 };
-    expect(() => applyKey({ u1: { findings: 1 }, u2: { findings: 2 } }, { u1: twin, u2: twin })).toThrow('u1 and u2');
+    expect(() => applyKey({ u1: { defects: [], findings: 1 }, u2: { defects: [], findings: 2 } }, { u1: twin, u2: twin })).toThrow('u1 and u2');
   });
 });
 
@@ -190,23 +190,60 @@ describe('applyKey', () => {
 
 describe('applyKey: corpus items', () => {
   const entry = (pr, over = {}) => ({ label: 'model-alpha', draw: 1, pr, batch: 102, attempt: 1, ...over });
+  const counts = (real, falsy) => ({ real, false: falsy, unfalsifiable: 0, published: real + falsy });
 
   it('puts the items of the corpus PRs of one label under draw 1 by PR', () => {
     const key = { u1: entry('344'), u2: entry('348') };
-    expect(applyKey({ u1: { real: 2, false: 0 }, u2: { real: 1, false: 1 } }, key)).toEqual({
-      'model-alpha': { 1: { corpus: { 344: { real: 2, false: 0 }, 348: { real: 1, false: 1 } } } },
+    expect(applyKey({ u1: counts(2, 0), u2: counts(1, 1) }, key)).toEqual({
+      'model-alpha': { 1: { corpus: { 344: counts(2, 0), 348: counts(1, 1) } } },
     });
   });
 
   it('treats batch 105 items of other PRs than 418 as corpus items and keeps its #418 items in the usual slot', () => {
     const key = { u1: entry('344', { batch: 105 }), u2: entry('418', { batch: 105 }) };
-    expect(applyKey({ u1: { real: 2 }, u2: { defects: ['D1'], findings: 2 } }, key)).toEqual({
-      'model-alpha': { 1: { defects: ['D1'], findings: 2, corpus: { 344: { real: 2 } }, pr: '418' } },
+    expect(applyKey({ u1: counts(2, 0), u2: { defects: ['D1'], findings: 2 } }, key)).toEqual({
+      'model-alpha': { 1: { defects: ['D1'], findings: 2, corpus: { 344: counts(2, 0) }, pr: '418' } },
     });
   });
 
   it('throws naming both ids when two ids land on one label and corpus PR', () => {
     const key = { u1: entry('344'), u2: entry('344') };
-    expect(() => applyKey({ u1: { real: 1 }, u2: { real: 2 } }, key)).toThrow('u1 and u2');
+    expect(() => applyKey({ u1: counts(1, 0), u2: counts(2, 0) }, key)).toThrow('u1 and u2');
+  });
+});
+
+describe('applyKey: every id of the key is scored', () => {
+  const entry = (draw) => ({ label: 'model-alpha', draw, pr: '418', batch: 3, attempt: 1 });
+
+  it('throws naming the ids the grader skipped', () => {
+    expect(() => applyKey({ u1: { defects: [], findings: 0 } }, { u1: entry(1), u2: entry(2), u3: entry(3) })).toThrow('anonymize: no score for u2, u3');
+  });
+});
+
+describe('applyKey: the grader output is checked', () => {
+  const defectItem = { label: 'model-alpha', draw: 1, pr: '418', batch: 3, attempt: 1 };
+  const corpusItem = { label: 'model-alpha', draw: 1, pr: '344', batch: 102, attempt: 1 };
+
+  it.each([
+    ['defects that are not a list', { defects: 'D1', findings: 1 }, 'defects'],
+    ['defects that are not strings', { defects: [1], findings: 1 }, 'defects'],
+    ['no defects', { findings: 1 }, 'defects'],
+    ['findings that are not a number', { defects: [], findings: '1' }, 'findings'],
+    ['no findings', { defects: [] }, 'findings'],
+  ])('throws naming the id for %s', (_name, value, field) => {
+    expect(() => applyKey({ u1: value }, { u1: defectItem })).toThrow(`anonymize: item u1: ${field}`);
+  });
+
+  it.each([
+    ['real', { false: 0, unfalsifiable: 0, published: 0 }],
+    ['false', { real: 0, unfalsifiable: 0, published: 0 }],
+    ['unfalsifiable', { real: 0, false: 0, published: 0 }],
+    ['published', { real: 0, false: 0, unfalsifiable: 0 }],
+  ])('throws naming the id for a corpus item with no %s', (field, value) => {
+    expect(() => applyKey({ u1: value }, { u1: corpusItem })).toThrow(`anonymize: item u1: ${field}`);
+  });
+
+  it('throws for a corpus count that is not a number', () => {
+    expect(() => applyKey({ u1: { real: '2', false: 0, unfalsifiable: 0, published: 2 } }, { u1: corpusItem })).toThrow('anonymize: item u1: real');
   });
 });
