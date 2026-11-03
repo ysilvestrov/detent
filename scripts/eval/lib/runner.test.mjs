@@ -587,3 +587,43 @@ describe('runPreflight when a check fails', () => {
     expect(result.failures).toEqual({ 418: 'context check exited 1: bad ***' });
   });
 });
+
+describe('runBatch with a torn or breaking shared record', () => {
+  it('refuses with 2 before any spawn when a shared file ends in a torn line, and leaves the file alone', async () => {
+    const s = setup();
+    mkdirSync(join(s.dir, 'records'), { recursive: true });
+    const torn = `${jsonl(callLine(0.1))}{"type":"call","runId":"r0","us`;
+    writeFileSync(s.shared(3), torn);
+    const { spawnRun, calls } = stub([ok()]);
+    const result = await runBatch({ ...s.common, runs: [run()], spawnRun });
+    expect(calls).toHaveLength(0);
+    expect(result).toEqual({ code: 2, spentUsd: 0, done: 0, failed: 0, left: 1, notApplicable: 0 });
+    expect(s.out).toEqual(['batch-3.jsonl: the last line is torn; remove it by hand, then run the batch again']);
+    expect(readFileSync(s.shared(3), 'utf8')).toBe(torn);
+  });
+
+  it('ends in 5, not a throw, when a shared file breaks after the first run', async () => {
+    const s = setup();
+    const corrupting = async (args, env, cwd) => {
+      mkdirSync(join(s.dir, 'records'), { recursive: true });
+      writeFileSync(s.shared(3), 'junk\n{"type":"manual","usd":0}\n');
+      return stub([ok()]).spawnRun(args, env, cwd);
+    };
+    const result = await runBatch({ ...s.common, runs: [run({ draw: 1 }), run({ draw: 2 })], spawnRun: corrupting });
+    expect(result).toEqual({ code: 5, spentUsd: 0, done: 0, failed: 1, left: 1, notApplicable: 0 });
+    expect(s.out.at(-1)).toMatch(/^batch-3\.jsonl: records: line 1 is not JSON/);
+  });
+
+  it('ends in 5 when spawnRun rejects, and the next invocation adopts the run and retries it as attempt 2', async () => {
+    const s = setup();
+    const rejecting = async () => {
+      throw new Error('spawn node ENOENT');
+    };
+    const first = await runBatch({ ...s.common, runs: [run()], spawnRun: rejecting });
+    expect(first).toEqual({ code: 5, spentUsd: 0, done: 0, failed: 1, left: 0, notApplicable: 0 });
+    const second = await runBatch({ ...s.common, runs: [run()], spawnRun: stub([ok(0.1)]).spawnRun });
+    expect(second).toEqual({ code: 0, spentUsd: 0.1, done: 1, failed: 0, left: 0, notApplicable: 0 });
+    const lines = parseRecords(readFileSync(s.shared(3), 'utf8'));
+    expect(lines.map((l) => [l.type, l.attempt, l.exit])).toEqual([['run', 1, 1], ['call', 2, undefined], ['run', 2, 0]]);
+  });
+});

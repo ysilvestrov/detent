@@ -60,6 +60,21 @@ function readShared(recordsDir) {
     });
 }
 
+/** The first shared file that ends in a line which is not JSON, or null. Such a tear is for the owner to cut away. */
+function tornShared(recordsDir) {
+  if (!existsSync(recordsDir)) return null;
+  for (const name of readdirSync(recordsDir).filter((n) => n.endsWith('.jsonl')).sort()) {
+    const rows = readFileSync(join(recordsDir, name), 'utf8').split('\n').filter((raw) => raw.trim() !== '');
+    if (rows.length === 0) continue;
+    try {
+      JSON.parse(rows.at(-1));
+    } catch {
+      return name;
+    }
+  }
+  return null;
+}
+
 /** Appends whole lines; if the file ends in a torn line, the new ones start on a line of their own. */
 function appendLines(file, lines) {
   if (lines.length === 0) return;
@@ -218,6 +233,8 @@ export async function runBatch({ runs, catalog, keys, ceilingUsd, recordsDir, tm
 
   const adoption = scrubber(keys);
   try {
+    const torn = tornShared(recordsDir);
+    if (torn !== null) throw new Error(`${torn}: the last line is torn; remove it by hand, then run the batch again`);
     adoptOrphans({ recordsDir, tmpDir, scrub: adoption.scrub, out });
     result.spentUsd = spend(readShared(recordsDir));
   } catch (error) {
@@ -237,56 +254,65 @@ export async function runBatch({ runs, catalog, keys, ceilingUsd, recordsDir, tm
     return { ...result, code: EXIT.usage, left: pending(0) };
   }
 
-  for (const [i, run] of runs.entries()) {
-    const lines = readShared(recordsDir);
-    const action = nextAction(run, lines);
-    if (action.action === 'skip') {
-      result.done += 1;
-      continue;
-    }
-
-    let verifyFrom = null;
-    if (run.from !== null) {
-      const find = `${run.from.label}/${run.from.pr}/${run.from.draw}`;
-      const file = savedFindings(lines).get(find);
-      if (file === undefined && !startedFinds(lines).has(find)) {
-        out(`skip ${runKey(run)}: the find of ${find} never ran`);
-        result.notApplicable += 1;
+  let at = 0;
+  try {
+    for (const [i, run] of runs.entries()) {
+      at = i;
+      const lines = readShared(recordsDir);
+      const action = nextAction(run, lines);
+      if (action.action === 'skip') {
+        result.done += 1;
         continue;
       }
-      if (file === undefined) {
-        out(`fail ${runKey(run)}: the find of ${find} left no findings`);
+
+      let verifyFrom = null;
+      if (run.from !== null) {
+        const find = `${run.from.label}/${run.from.pr}/${run.from.draw}`;
+        const file = savedFindings(lines).get(find);
+        if (file === undefined && !startedFinds(lines).has(find)) {
+          out(`skip ${runKey(run)}: the find of ${find} never ran`);
+          result.notApplicable += 1;
+          continue;
+        }
+        if (file === undefined) {
+          out(`fail ${runKey(run)}: the find of ${find} left no findings`);
+          result.failed += 1;
+          continue;
+        }
+        verifyFrom = join(recordsDir, file);
+      }
+
+      result.spentUsd = spend(lines);
+      if (!admit({ spentUsd: result.spentUsd, estimateUsd: run.estimateUsd, ceilingUsd })) {
+        out(`stop at the ceiling: spent ${result.spentUsd.toFixed(2)} of ${ceilingUsd}, ${pending(i)} run(s) left`);
+        return { ...result, code: EXIT.ceiling, left: pending(i) };
+      }
+
+      out(`run ${runKey(run)} attempt ${action.attempt}`);
+      let outcome;
+      try {
+        outcome = await execute({ run, attempt: action.attempt, keys, base, repo, recordsDir, tmpDir, spawnRun, out, verifyFrom });
+      } catch (error) {
+        // The child's temp record is still in tmpDir with its sidecar; the next invocation adopts it before it admits anything.
+        out(`${runKey(run)}: ${error.message}; its record stays in ${tmpDir} and is adopted on the next invocation`);
         result.failed += 1;
-        continue;
+        return { ...result, code: EXIT.failed, left: pending(i + 1) };
       }
-      verifyFrom = join(recordsDir, file);
+      result.spentUsd = spend(readShared(recordsDir));
+      if (outcome.clean || run.expectFailure) result.done += 1;
+      else result.failed += 1;
+      if (outcome.leaked) {
+        out('a key was found in the output of a run; it is scrubbed, the spend is kept, the batch stops');
+        return { ...result, code: EXIT.leaked, left: pending(i + 1) };
+      }
     }
-
-    result.spentUsd = spend(lines);
-    if (!admit({ spentUsd: result.spentUsd, estimateUsd: run.estimateUsd, ceilingUsd })) {
-      out(`stop at the ceiling: spent ${result.spentUsd.toFixed(2)} of ${ceilingUsd}, ${pending(i)} run(s) left`);
-      return { ...result, code: EXIT.ceiling, left: pending(i) };
-    }
-
-    out(`run ${runKey(run)} attempt ${action.attempt}`);
-    let outcome;
-    try {
-      outcome = await execute({ run, attempt: action.attempt, keys, base, repo, recordsDir, tmpDir, spawnRun, out, verifyFrom });
-    } catch (error) {
-      // The child's temp record is still in tmpDir with its sidecar; the next invocation adopts it before it admits anything.
-      out(`${runKey(run)}: ${error.message}; its record stays in ${tmpDir} and is adopted on the next invocation`);
-      result.failed += 1;
-      return { ...result, code: EXIT.failed, left: pending(i + 1) };
-    }
-    result.spentUsd = spend(readShared(recordsDir));
-    if (outcome.clean || run.expectFailure) result.done += 1;
-    else result.failed += 1;
-    if (outcome.leaked) {
-      out('a key was found in the output of a run; it is scrubbed, the spend is kept, the batch stops');
-      return { ...result, code: EXIT.leaked, left: pending(i + 1) };
-    }
+    return { ...result, code: result.failed > 0 ? EXIT.failed : 0 };
+  } catch (error) {
+    // Something unreadable after a child may have paid; its record is in tmpDir and the next invocation adopts it.
+    out(error.message);
+    result.failed += 1;
+    return { ...result, code: EXIT.failed, left: runs.length - at - 1 };
   }
-  return { ...result, code: result.failed > 0 ? EXIT.failed : 0 };
 }
 
 /** What `--context-only` said about one PR: `ok`, a `drop` (the spec's rule), or a `failed` check that says nothing. */
