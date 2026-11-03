@@ -74,17 +74,36 @@ export function anonymize({ runs, read, shuffle = shuffleInPlace }) {
 const CORPUS_BATCHES = [102, 103, 105];
 const MAIN_PR = '418';
 
+const CORPUS_COUNTS = ['real', 'false', 'unfalsifiable', 'published'];
+
+/** What the grader must give for one item; a wrong shape would turn into a silent zero in the report. */
+function checkScore(id, value, isCorpus) {
+  const bad = (what) => {
+    throw new Error(`anonymize: item ${id}: ${what}`);
+  };
+  if (isCorpus) {
+    for (const name of CORPUS_COUNTS) if (!Number.isFinite(value[name])) bad(`${name} must be a number`);
+    return;
+  }
+  if (!Array.isArray(value.defects) || !value.defects.every((d) => typeof d === 'string')) bad('defects must be a list of strings');
+  if (!Number.isFinite(value.findings)) bad('findings must be a number');
+}
+
 /**
- * Anonymous scores to `{label: {draw: scores}}`; an id missing from the key is a mix-up and throws.
+ * Anonymous scores to `{label: {draw: scores}}`; an id missing from the key is a mix-up and throws, and so does an
+ * id of the key with no score: a skipped item would silently drop a draw and then the label.
  * A corpus item goes to `scores[label][1].corpus[pr]`, so the several PRs of one label do not meet in one slot.
  */
 export function applyKey(anonScores, key) {
   const scores = {};
   const taken = {};
+  for (const id of Object.keys(anonScores)) if (key[id] === undefined) throw new Error(`anonymize: id ${id} is not in the key`);
+  const unscored = Object.keys(key).filter((id) => anonScores[id] === undefined);
+  if (unscored.length > 0) throw new Error(`anonymize: no score for ${unscored.join(', ')}`);
   for (const [id, value] of Object.entries(anonScores)) {
     const entry = key[id];
-    if (entry === undefined) throw new Error(`anonymize: id ${id} is not in the key`);
     const isCorpus = CORPUS_BATCHES.includes(entry.batch) && entry.pr !== MAIN_PR;
+    checkScore(id, value, isCorpus);
     const slot = isCorpus ? `${entry.label}|corpus|${entry.pr}` : `${entry.label}|${entry.draw}`;
     if (taken[slot] !== undefined) throw new Error(`anonymize: ids ${taken[slot]} and ${id} are both label ${entry.label}, draw ${entry.draw}`);
     taken[slot] = id;

@@ -53,11 +53,11 @@ export function pickProfiles(rows, baseline) {
   const best = {};
   const balanced = {};
   const value = {};
-  // For ranking only: a row with no judge yet would look cheapest for that reason alone.
+  // For ranking only: a row with no judge measured on #418 would look cheapest for that reason alone.
   const estimate = baseline.judgeUsd ?? null;
-  const cost = (row) => (row.productionUsd ?? Infinity) + (row.judge === null ? estimate ?? 0 : 0);
+  const cost = (row) => (row.productionUsd ?? Infinity) + (row.judgeUsd === null ? estimate ?? 0 : 0);
   const judgeNote = (row) => {
-    if (row.judge !== null) return '';
+    if (row.judgeUsd !== null) return '';
     return estimate === null ? 'no judge cost in the price yet' : `judge cost estimated at ${usd(estimate)} from the baseline`;
   };
   const isBaseline = (row) => row.label === baseline.label && row.judge === baseline.judge;

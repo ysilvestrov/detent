@@ -295,6 +295,321 @@ describe('the report', () => {
   });
 });
 
+describe('anonymize.mjs', () => {
+  const clean = { defects: ['D1'], findings: 1 };
+
+  /** Batch 1 run and anonymized; `scores` gives every item the same score. */
+  function anonymized() {
+    const s = setup();
+    expect(s.preflight().code).toBe(0);
+    expect(s.batch(1, 11).code).toBe(0);
+    const items = join(s.dir, 'items.json');
+    expect(s.anonymize('--batch', '1', '--out', items).code).toBe(0);
+    const ids = JSON.parse(readFileSync(items, 'utf8')).map((item) => item.id);
+    const scores = join(s.dir, 'scores.json');
+    const write = (value) => writeFileSync(scores, JSON.stringify(value));
+    write(Object.fromEntries(ids.map((id) => [id, clean])));
+    return { ...s, ids, scores, write, items };
+  }
+
+  it('refuses a second anonymize against the same key, and names --key', () => {
+    const s = anonymized();
+    const result = s.anonymize('--batch', '1', '--out', s.items);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('pass another --key');
+  });
+
+  it('writes another key when given --key', () => {
+    const s = anonymized();
+    expect(s.anonymize('--batch', '1', '--out', s.items, '--key', join(s.dir, 'second.json')).code).toBe(0);
+  });
+
+  it('applies, and then refuses to overwrite the scores unless --force', () => {
+    const s = anonymized();
+    expect(s.anonymize('--apply', s.scores, '--batch', '1').code).toBe(0);
+    writeFileSync(s.scoresFile(1), '{"owner":"corrected"}');
+    const refused = s.anonymize('--apply', s.scores, '--batch', '1');
+    expect(refused.code).toBe(2);
+    expect(refused.stderr).toContain('--force');
+    expect(readFileSync(s.scoresFile(1), 'utf8')).toBe('{"owner":"corrected"}');
+    expect(s.anonymize('--apply', s.scores, '--batch', '1', '--force').code).toBe(0);
+    expect(Object.keys(JSON.parse(readFileSync(s.scoresFile(1), 'utf8'))).sort()).toEqual(['gpt-5.6-sol', 'gpt-5.6-sol@gpt-5.5']);
+  });
+
+  it('refuses a key of another batch', () => {
+    const s = anonymized();
+    const result = s.anonymize('--apply', s.scores, '--batch', '2', '--key', s.keyFile(1));
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('the key is of batch 1, not batch 2');
+  });
+
+  it('refuses scores that skip an item, naming it', () => {
+    const s = anonymized();
+    s.write(Object.fromEntries(s.ids.slice(1).map((id) => [id, clean])));
+    const result = s.anonymize('--apply', s.scores, '--batch', '1');
+    expect(result.code).toBe(2);
+    expect(result.stderr).toBe(`anonymize: no score for ${s.ids[0]}\n`);
+  });
+
+  it('refuses a malformed item, naming it', () => {
+    const s = anonymized();
+    s.write(Object.fromEntries(s.ids.map((id) => [id, { defects: 'D1', findings: 1 }])));
+    const result = s.anonymize('--apply', s.scores, '--batch', '1');
+    expect(result.code).toBe(2);
+    expect(result.stderr).toMatch(/^anonymize: item [0-9a-f-]+: defects must be a list of strings\n$/);
+  });
+});
+
+describe('the owner sequence, batch 0 to the report', () => {
+  const s = setup();
+  const STEP_MS = 60000;
+  const defects = (...ids) => ({ defects: ids, findings: 3 });
+  const counts = (real) => ({ real, false: 0, unfalsifiable: 0, published: real });
+  const selection = ['--labels'];
+  const toOpenai = ['--verify-model', 'gpt-5.5', '--verify-route', 'openai'];
+
+  /** The blind grader, with `score(entry)` looking the answer up in the key; what the real one never sees. */
+  function grade(n, score) {
+    const items = join(s.dir, `items-${n}.json`);
+    expect(s.anonymize('--batch', String(n), '--out', items).code).toBe(0);
+    const key = JSON.parse(readFileSync(s.keyFile(n), 'utf8'));
+    const graded = Object.fromEntries(JSON.parse(readFileSync(items, 'utf8')).map((item) => [item.id, score(key[item.id])]));
+    const file = join(s.dir, `graded-${n}.json`);
+    writeFileSync(file, JSON.stringify(graded));
+    expect(s.anonymize('--apply', file, '--batch', String(n)).code).toBe(0);
+  }
+  const byLabel = (table) => (entry) => table[entry.label];
+  const byPr = (table) => (entry) => table[entry.pr];
+  const runLines = (n) => s.records(n).filter((line) => line.type === 'run');
+
+  it('pins the hosts', () => {
+    expect(s.endpoints().code).toBe(0);
+    expect(row(s.catalog(), 'qwen3.8-flash').only).toEqual(['alibaba']);
+  }, STEP_MS);
+
+  it('batch 0: a model that answers empty fails the batch', () => {
+    s.control({ fail: ['qwen3.8-flash|895|1'] });
+    expect(s.batch(0, 11).code).toBe(5);
+  }, STEP_MS);
+
+  it('batch 0: the retry runs it on another host, as attempt 2, and nothing else', () => {
+    s.control({ unparseable: ['grok-build-0.1|418|2'], verdicts: { 'qwen3.8-flash|gpt-5.5': ['confirmed', 'refuted'], 'claude-opus-5-5|gpt-5.5': ['refuted', 'refuted', 'confirmed'], 'gpt-6-astra|gpt-5.5': ['confirmed', 'error'] } });
+    expect(s.endpoints('--labels', 'qwen3.8-flash', '--exclude-host', 'alibaba').code).toBe(0);
+    expect(s.batch(0, 11).code).toBe(0);
+    expect(runLines(0).filter((line) => line.label === 'qwen3.8-flash').map((line) => [line.attempt, line.exit, line.only.find])).toEqual([
+      [1, 5, ['alibaba']],
+      [2, 0, ['other']],
+    ]);
+    expect(runLines(0).filter((line) => line.mode === 'verify').map((line) => [line.pr, line.expectFailure])).toEqual([['688', true]]);
+  }, STEP_MS);
+
+  it('batch 1 waits for the preflight', () => {
+    expect(s.batch(1, 11).code).toBe(2);
+    expect(s.preflight().code).toBe(0);
+    expect(s.batch(1, 11).code).toBe(0);
+    grade(1, byLabel({ 'gpt-5.6-sol': defects('D1', 'D2', 'D3'), 'gpt-5.6-sol@gpt-5.5': defects('D1', 'D2') }));
+  }, STEP_MS);
+
+  it('batch 2: a broken answer fails its run', () => {
+    expect(s.batch(2, 11).code).toBe(5);
+    grade(2, byLabel({ 'claude-haiku-5-5': defects('D1', 'D2', 'D3'), 'qwen3.8-flash': defects('D1', 'D2', 'D3'), 'grok-build-0.1': defects('D1') }));
+  }, STEP_MS);
+
+  it('batch 4 needs the scores of batch 3', () => {
+    expect(s.batch(4, 11, ...selection, 'gpt-6.1-sol').code).toBe(2);
+    expect(s.batch(3, 11).code).toBe(0);
+    grade(3, byLabel({ 'gpt-6.1-terra': defects('D1'), 'gpt-6.1-sol': defects('D1', 'D2'), 'claude-sonnet-5-5': defects('D1', 'D2') }));
+  }, STEP_MS);
+
+  it('batch 4 takes only those who survived batch 3', () => {
+    const refused = s.batch(4, 11, ...selection, 'gpt-6.1-terra');
+    expect([refused.code, refused.stderr]).toEqual([2, 'batch 4: gpt-6.1-terra did not survive batch 3\n']);
+    expect(s.batch(4, 11, ...selection, 'gpt-6.1-sol,claude-sonnet-5-5').code).toBe(0);
+    grade(4, byLabel({ 'gpt-6.1-sol': defects('D1', 'D2', 'D3'), 'claude-sonnet-5-5': defects('D1', 'D2', 'D3') }));
+  }, STEP_MS);
+
+  it('batch 5 and batch 6: the unstable one gets no third draw', () => {
+    expect(s.batch(5, 11).code).toBe(0);
+    const scores = { 'claude-opus-5-5': { 1: defects('D1', 'D2'), 2: defects('D1', 'D2') }, 'gpt-6-astra': { 1: defects('D1', 'D2'), 2: defects('D1', 'D2', 'D3', 'D4') } };
+    grade(5, (entry) => scores[entry.label][entry.draw]);
+    const refused = s.batch(6, 11, ...selection, 'gpt-6-astra');
+    expect([refused.code, refused.stderr]).toEqual([2, 'batch 6: gpt-6-astra did not survive batch 5\n']);
+    expect(s.batch(6, 11, ...selection, 'claude-opus-5-5').code).toBe(0);
+    grade(6, byLabel({ 'claude-opus-5-5': defects('D1', 'D2', 'D3', 'D4') }));
+  }, STEP_MS);
+
+  it('batch 7 goes round by round, and a verify with an error verdict fails its run', () => {
+    const result = s.batch(7, 11, ...selection, 'gpt-6.1-sol,qwen3.8-flash,claude-sonnet-5-5,claude-opus-5-5,gpt-6-astra');
+    expect(result.code).toBe(5);
+    expect(result.stdout).toContain('skip 7|verify|gpt-6-astra|418|3|gpt-5.5: the find of gpt-6-astra/418/3 never ran');
+    expect(result.stdout).toContain('batch 7: done 12, failed 2, left 0, not applicable 1');
+    expect(runLines(7).map((line) => line.draw)).toEqual([1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3]);
+    grade(7, byLabel({ 'gpt-6.1-sol': defects('D1', 'D2'), 'qwen3.8-flash': defects('D1', 'D2'), 'claude-sonnet-5-5': defects('D1', 'D2'), 'claude-opus-5-5': defects('D1', 'D2') }));
+  }, STEP_MS);
+
+  it('batch 101: an OpenRouter finalist runs with the gpt-5.5 judge on the judge host', () => {
+    const refused = s.batch(101, 16, ...selection, 'qwen3.8-flash,gpt-6.1-sol', ...toOpenai);
+    expect(refused.code).toBe(2);
+    expect(s.batch(101, 16, ...selection, 'qwen3.8-flash', '--verify-model', 'openai/gpt-5.5', '--verify-route', 'openrouter').code).toBe(0);
+    expect(s.batch(101, 16, ...selection, 'gpt-6.1-sol', ...toOpenai).code).toBe(0);
+    expect(runLines(101).filter((line) => line.label === 'qwen3.8-flash' && line.draw === 1).map((line) => line.only)).toEqual([{ find: ['other'], verify: ['openai'] }]);
+    grade(101, byLabel({ 'gpt-5.6-sol': defects('D1'), 'qwen3.8-flash': defects('D1'), 'gpt-6.1-sol': defects('D1', 'D2') }));
+  }, STEP_MS);
+
+  it('batches 102 and 103: the corpus', () => {
+    expect(s.batch(102, 16).code).toBe(0);
+    grade(102, () => counts(1));
+    expect(s.batch(103, 16, ...selection, 'gpt-6.1-sol', ...toOpenai).code).toBe(0);
+    grade(103, () => counts(2));
+  }, STEP_MS);
+
+  it('batch 104: the judges on the same inputs', () => {
+    expect(s.batch(104, 16, '--judges', 'claude-sonnet-5-5:anthropic,gpt-6.1-sol:openai', ...selection, 'gpt-6.1-sol').code).toBe(0);
+    grade(104, byLabel({
+      'gpt-5.6-sol@claude-sonnet-5-5': defects('D1'),
+      'gpt-5.6-sol@gpt-6.1-sol': defects('D1'),
+      'gpt-6.1-sol@claude-sonnet-5-5': defects('D1'),
+      'gpt-6.1-sol@gpt-6.1-sol': defects('D1'),
+    }));
+  }, STEP_MS);
+
+  it('batch 105 needs the dirty tree allowed', () => {
+    writeFileSync(join(s.repo, 'untracked.txt'), 'x');
+    expect(s.batch(105, 16).code).toBe(2);
+    expect(s.batch(105, 16, '--allow-dirty').code).toBe(0);
+    grade(105, byPr({ 418: defects('D1'), 344: counts(1), 348: counts(1), 352: counts(1) }));
+    unlinkSync(join(s.repo, 'untracked.txt'));
+  }, STEP_MS);
+
+  it('batch 106: two pairs of one finder both run', () => {
+    expect(s.batch(106, 16, ...selection, 'claude-sonnet-5-5', '--verify-model', 'claude-haiku-5-5', '--verify-route', 'anthropic').code).toBe(0);
+    expect(s.batch(106, 16, ...selection, 'claude-sonnet-5-5', '--verify-model', 'claude-sonnet-5-5', '--verify-route', 'anthropic').code).toBe(0);
+    expect(runLines(106).length).toBe(6);
+    grade(106, byLabel({ 'claude-sonnet-5-5@claude-haiku-5-5': defects('D1', 'D2', 'D3', 'D4', 'D5'), 'claude-sonnet-5-5@claude-sonnet-5-5': defects('D1', 'D2', 'D3', 'D4') }));
+  }, STEP_MS);
+
+  describe('the report', () => {
+    let lines;
+    let rows;
+    const pairOf = (pair) => rows.find((r) => r.pair === pair);
+
+    beforeAll(() => {
+      expect(s.funnel('--note-spend', '0.5', '--reason', 'verify-corpus').code).toBe(0);
+      const scoresDir = dirname(s.scoresFile(1));
+      const judges = { 'gpt-5.5': 15, 'claude-haiku-5-5': 14, 'claude-sonnet-5-5': 14, 'gpt-6.1-sol': 13 };
+      writeFileSync(join(scoresDir, 'judges.json'), JSON.stringify(judges));
+      const catalog = s.catalog();
+      row(catalog, 'gpt-6.1-terra').dropped = 'one defect of five';
+      s.writeCatalog(catalog);
+      const result = s.report();
+      expect([result.code, result.stderr]).toEqual([0, '']);
+      lines = result.stdout.split('\n');
+      const recordsDir = join(s.out, 'docs', 'eval', '2026-11', 'records');
+      const byNumber = (a, b) => parseInt(a.slice(6), 10) - parseInt(b.slice(6), 10);
+      const records = readdirSync(recordsDir).filter((name) => name.startsWith('batch-')).sort(byNumber).flatMap((name) => parseRecords(readFileSync(join(recordsDir, name), 'utf8')));
+      const batches = Object.fromEntries(readdirSync(scoresDir).filter((name) => name.startsWith('batch-')).map((name) => [name.slice(6, -5), JSON.parse(readFileSync(join(scoresDir, name), 'utf8'))]));
+      rows = summarize({ lines: records, catalog: s.catalog(), scores: { batches, judges }, cacheRuleApplies: false });
+    }, STEP_MS);
+
+    it('prints the rows of one finder with each of its judges', () => {
+      expect(lines).toContain('| claude-sonnet-5-5 | anthropic | claude-sonnet-5-5 + gpt-5.5 | 3 | 2/3/3 | 3 | 3 | D4, D5 | 2 | D1, D2 | D3, D4, D5 | - | 0 | 0% | $0.37 | $0.05 |  |');
+      expect(lines).toContain('| claude-sonnet-5-5 | anthropic | claude-sonnet-5-5 + claude-haiku-5-5 | 3 | 2/3/3 | 3 | 3 | D4, D5 | 5 | D1, D2, D3, D4, D5 | none | - | 0 | 0% | $0.30 | $0.03 |  |');
+      expect(lines).toContain('| qwen3.8-flash | openrouter | qwen/qwen3.8-flash + gpt-5.5 | 3 | 3/3/3 | 3 | 3 | D4, D5 | 2 | D1, D2 | D3, D4, D5 | - | 1 | 0% | $0.10 | $0.03 |  |');
+      expect(lines).toContain('| qwen3.8-flash | openrouter | qwen/qwen3.8-flash + openai/gpt-5.5 | 3 | 3/3/3 | 3 | 3 | D4, D5 | - | - | - | 1 | 0 | 0% | $0.10 | $0.00 |  |');
+    });
+
+    it('keeps batch 105 its own row', () => {
+      expect(lines).toContain('| gpt-5.6-sol (generic prompts) | openai | gpt-5.6-sol + gpt-5.5 | 0 |  | - | 0 | - | 1 | D1 | D2, D3, D4, D5 | - | 0 | 0% | $0.50 | $0.09 |  |');
+    });
+
+    it('gives every row exactly the pairs that were run', () => {
+      expect(rows.map((r) => r.pair)).toEqual([
+        'gpt-5.6-sol + gpt-5.5',
+        'gpt-5.6-sol + claude-sonnet-5-5',
+        'gpt-5.6-sol + gpt-6.1-sol',
+        'claude-haiku-5-5 (no judge yet)',
+        'qwen/qwen3.8-flash + gpt-5.5',
+        'qwen/qwen3.8-flash + openai/gpt-5.5',
+        'x-ai/grok-build-0.1 (no judge yet)',
+        'gpt-6.1-terra (no judge yet)',
+        'gpt-6.1-sol + gpt-5.5',
+        'gpt-6.1-sol + claude-sonnet-5-5',
+        'gpt-6.1-sol + gpt-6.1-sol',
+        'claude-sonnet-5-5 + gpt-5.5',
+        'claude-sonnet-5-5 + claude-haiku-5-5',
+        'claude-sonnet-5-5 + claude-sonnet-5-5',
+        'claude-opus-5-5 + gpt-5.5',
+        'gpt-6-astra + gpt-5.5',
+        'gpt-5.6-sol + gpt-5.5',
+      ]);
+    });
+
+    it('fills every field of the baseline pair', () => {
+      const r = pairOf('gpt-5.6-sol + gpt-5.5');
+      expect({ ...r, paidUsd: Number(r.paidUsd.toFixed(4)), productionUsd: Number(r.productionUsd.toFixed(4)) }).toEqual({
+        label: 'gpt-5.6-sol',
+        generic: false,
+        route: 'openai',
+        tier: null,
+        dropped: false,
+        judge: 'gpt-5.5',
+        pair: 'gpt-5.6-sol + gpt-5.5',
+        draws: 3,
+        perDraw: [3, 3, 3],
+        medianKnown: 3,
+        union: 3,
+        findDefects: ['D1', 'D2', 'D3'],
+        missedFind: ['D4', 'D5'],
+        unstable: false,
+        medianPublished: 2,
+        publishedDefects: ['D1', 'D2'],
+        missedPublished: ['D3', 'D4', 'D5'],
+        refutedMean: 0,
+        errorShare: 0,
+        paidUsd: 0.9925,
+        productionUsd: 0.094,
+        judgeUsd: 0.024,
+        composite: false,
+        corpus: { real: 3, false: 0, unfalsifiable: 0, published: 3, prs: 3 },
+        judgeConsensus: 15,
+        brokenCalls: 0,
+        medianRecall930: 1,
+      });
+    });
+
+    it('counts a broken call and a broken answer', () => {
+      expect([pairOf('qwen/qwen3.8-flash + gpt-5.5').brokenCalls, pairOf('x-ai/grok-build-0.1 (no judge yet)').brokenCalls]).toEqual([1, 1]);
+    });
+
+    it('marks the failed verifies of a pair', () => {
+      const r = pairOf('gpt-6-astra + gpt-5.5');
+      expect([r.errorShare, r.composite, r.brokenCalls, r.medianPublished, r.unstable, r.tier]).toEqual([0.5, true, 2, null, true, 'expensive']);
+    });
+
+    it('takes the batch 104 pair with its consensus', () => {
+      const r = pairOf('gpt-6.1-sol + gpt-6.1-sol');
+      expect([r.medianPublished, r.composite, r.judgeConsensus]).toEqual([1, false, 13]);
+    });
+
+    it('counts the corpus of the pair that ran it', () => {
+      expect([pairOf('gpt-6.1-sol + gpt-5.5').corpus, pairOf('gpt-6.1-sol + gpt-6.1-sol').corpus.prs]).toEqual([{ real: 6, false: 0, unfalsifiable: 0, published: 6, prs: 3 }, 0]);
+    });
+
+    it('leaves the expensive tier and the refuted out of the profiles', () => {
+      const anthropic = lines.slice(lines.indexOf('### anthropic'), lines.indexOf('### openrouter'));
+      expect(anthropic.filter((line) => line.startsWith('| best') || line.startsWith('| balanced')).join('\n')).not.toContain('claude-opus-5-5');
+    });
+
+    it('flags a dropped candidate, whose earlier calls stay priced', () => {
+      expect(lines).toContain('| gpt-6.1-terra | openai | gpt-6.1-terra (no judge yet) | 1 | 1 | 1 | 1 | D2, D3, D4, D5 | - | - | - | - | - | - | $0.03 | $0.01 | composite, dropped |');
+    });
+
+    it('prints the manual spend', () => {
+      expect(lines).toContain('- manual: $0.50');
+    });
+  });
+});
+
 describe('the paths', () => {
   it('keeps every file of a run under --out-root', () => {
     const s = setup();

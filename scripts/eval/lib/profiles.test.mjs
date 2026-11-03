@@ -148,6 +148,11 @@ describe('a row with no judge', () => {
     expect([cell.row.label, cell.note]).toEqual(['alone', 'judge cost estimated at $0.50 from the baseline']);
   });
 
+  it('ranks a judge with no verify on #418 the same way, so a #930-only pair does not look cheap', () => {
+    const rows = [row({ label: 'on930', judge: 'j', judgeUsd: null, productionUsd: 0.1 }), row({ label: 'paired', productionUsd: 0.4 })];
+    expect(pickProfiles(rows, none).value.openai.row.label).toBe('paired');
+  });
+
   it('keeps its productionUsd', () => {
     const alone = row({ label: 'alone', judge: null, judgeUsd: null, productionUsd: 0.1 });
     expect(pickProfiles([alone], none).value.openai.row.productionUsd).toBe(0.1);

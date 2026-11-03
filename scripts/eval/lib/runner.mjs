@@ -139,6 +139,7 @@ function absorb({ meta, recordPath, findingsPath, childCode, recordsDir, scrub }
     key: meta.key,
     mode: meta.mode,
     attempt: meta.attempt,
+    expectFailure: meta.expectFailure,
     findingsFile,
   });
   const shared = join(recordsDir, `batch-${meta.batch}.jsonl`);

@@ -214,7 +214,7 @@ describe('runBatch', () => {
     const result = await runBatch({ ...s.common, runs: [run()], spawnRun });
     expect(result).toEqual({ code: 5, spentUsd: 0.1, done: 0, failed: 1, left: 0, notApplicable: 0 });
     const lines = parseRecords(readFileSync(s.shared(3), 'utf8'));
-    expect(lines[0]).toEqual({ ...callLine(0.1), requestedModel: 'm-find', key: '3|find|a|418|1', mode: 'find', attempt: 1, findingsFile: null });
+    expect(lines[0]).toEqual({ ...callLine(0.1), requestedModel: 'm-find', key: '3|find|a|418|1', mode: 'find', attempt: 1, expectFailure: false, findingsFile: null });
     expect(lines[1]).toMatchObject({ type: 'run', exit: 137, error: 'the child ended with exit 137 and wrote no run line', attempt: 1, findingsFile: null });
     expect(lines).toHaveLength(2);
   });
@@ -224,8 +224,8 @@ describe('runBatch', () => {
     const { spawnRun } = stub([ok(0.1)]);
     await runBatch({ ...s.common, runs: [run()], spawnRun });
     expect(parseRecords(readFileSync(s.shared(3), 'utf8'))).toEqual([
-      { ...callLine(0.1), requestedModel: 'm-find', key: '3|find|a|418|1', mode: 'find', attempt: 1, findingsFile: null },
-      { ...runLine(), requestedModel: 'm-find', key: '3|find|a|418|1', mode: 'find', attempt: 1, findingsFile: 'findings/b3-a-pr418-d1-a1-find.json' },
+      { ...callLine(0.1), requestedModel: 'm-find', key: '3|find|a|418|1', mode: 'find', attempt: 1, expectFailure: false, findingsFile: null },
+      { ...runLine(), requestedModel: 'm-find', key: '3|find|a|418|1', mode: 'find', attempt: 1, expectFailure: false, findingsFile: 'findings/b3-a-pr418-d1-a1-find.json' },
     ]);
   });
 
@@ -314,6 +314,20 @@ describe('runBatch', () => {
     const s = setup();
     const result = await runBatch({ ...s.common, runs: [run()], spawnRun: stub([failedAnswer()]).spawnRun });
     expect(result).toEqual({ code: 5, spentUsd: 0.1, done: 0, failed: 1, left: 0, notApplicable: 0 });
+  });
+
+  it('writes expectFailure on the run line', async () => {
+    const s = setup();
+    const record = jsonl(callLine(0.1, 'verify'), runLine({ exit: 0, error: '1 of 1 findings not verified' }));
+    const verify = verifyOfA({ from: null, expectFailure: true });
+    await runBatch({ ...s.common, runs: [verify], spawnRun: stub([ok(0.1, { record, writes: [] })]).spawnRun });
+    expect(parseRecords(readFileSync(s.shared(3), 'utf8')).map((l) => [l.type, l.expectFailure])).toEqual([['call', true], ['run', true]]);
+  });
+
+  it('writes false on the lines of an ordinary run', async () => {
+    const s = setup();
+    await runBatch({ ...s.common, runs: [run()], spawnRun: stub([ok(0.1)]).spawnRun });
+    expect(parseRecords(readFileSync(s.shared(3), 'utf8')).map((l) => l.expectFailure)).toEqual([false, false]);
   });
 
   it('returns 0 when an expected failure failed', async () => {

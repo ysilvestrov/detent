@@ -4,8 +4,8 @@
 //
 //   batch-<n>.json   {label: {draw: Score}}, as `applyKey` writes it. A Score is
 //                      {defects: string[], findings: number, pr: string, corpus?: {pr: Corpus}}
-//                    `defects` are the ids D1-D5 the item found; `pr` is written by `applyKey` from the key, never taken from the grader (a score without one reads as "418");
-//                    `corpus` is {pr: {real, false, unfalsifiable, published}}, counts of the findings of each corpus PR;
+//                    `defects` are the ids the item found, D1-D5 on #418 and R1-R3 on #930, confirmed results only for a verify or whole run; `pr` is written by `applyKey` from the key, never taken from the grader (a score without one reads as "418");
+//                    `corpus` is {pr: {real, false, unfalsifiable, published}}, counts of the confirmed findings of each corpus PR;
 //                    `applyKey` writes it on the label's draw 1 of batch 102, 103 or 105 from the grader's per-item fields.
 //                    Batch 105 (generic prompts) is its own row, `<baseline> (generic prompts)`, and is never a profile.
 //                    In batches 1, 104 and 106 a verify or whole run is scored under `<label>@<judge>`, a find under the plain label.
