@@ -133,7 +133,8 @@ async function endpointsCommand(args, { candidatesFile }) {
     try {
       const response = await fetch(`https://openrouter.ai/api/v1/models/${entry.model}/endpoints`);
       if (!response.ok) throw new Error(`/endpoints answered ${response.status}`);
-      endpoints = (await response.json()).data.endpoints;
+      endpoints = (await response.json()).data?.endpoints;
+      if (!Array.isArray(endpoints)) throw new Error(`/endpoints answered ${response.status} with no endpoints`);
     } catch (error) {
       failed.push(`${entry.model}: ${error.message}`);
       continue;

@@ -37,9 +37,12 @@ function cellOf(row, pool, extra = '') {
   if (row.unstable) notes.push('unstable: the owner decides');
   if (row.composite) notes.push('composite pair');
   if (row.corpusFrom !== null) notes.push(`corpus counts from the finder's run with ${row.corpusFrom}`);
+  // Nobody can configure such a pair in production, but it stays in the pool: selection needs these leaders.
+  const unconfigurable = row.judge !== null && !row.runnable;
+  if (unconfigurable) notes.push('not runnable through one provider');
   if (pool === 'unadmitted') notes.push('nobody on the route passed the admission');
   if (extra !== '') notes.push(extra);
-  return { row, preliminary: !verdict.ok || row.medianRecall930 === null || row.medianPublished === null, note: notes.join('; ') };
+  return { row, preliminary: !verdict.ok || row.medianRecall930 === null || row.medianPublished === null || unconfigurable, note: notes.join('; ') };
 }
 
 const empty = { row: null, preliminary: false, note: 'no row on this route' };

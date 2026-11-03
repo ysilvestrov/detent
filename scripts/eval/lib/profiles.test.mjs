@@ -23,6 +23,7 @@ const row = (over) => ({
   unstable: false,
   corpus: { real: 4, false: 0, unfalsifiable: 0, published: 4, prs: 5 },
   corpusFrom: null,
+  runnable: true,
   judgeConsensus: 15,
   brokenCalls: 0,
   medianRecall930: 2,
@@ -227,6 +228,25 @@ describe('balanced names what it gives up', () => {
   it('says no defect is named when the unions match', () => {
     const rows = [row({ label: 'leader', medianPublished: 5, productionUsd: 0.5 }), row({ label: 'close', medianPublished: 4, productionUsd: 0.2 })];
     expect(pickProfiles(rows, none).balanced.openai.note).toBe('loses no named defect against leader; saves $0.30 per PR');
+  });
+});
+
+describe('a pair nobody can configure', () => {
+  const foreign = row({ label: 'far', route: 'anthropic', runnable: false, medianPublished: 5 });
+
+  it('is preliminary with the note, though it passed the admission', () => {
+    const cell = pickProfiles([foreign], baseline).best.anthropic;
+    expect([admitted(foreign).ok, cell.row.label, cell.preliminary, cell.note]).toEqual([true, 'far', true, 'not runnable through one provider']);
+  });
+
+  it('stays in the pool and leads a weaker pair that is runnable', () => {
+    const near = row({ label: 'near', route: 'anthropic', medianPublished: 3 });
+    expect(pickProfiles([near, foreign], baseline).best.anthropic.row.label).toBe('far');
+  });
+
+  it('does not say so of a finder with no judge', () => {
+    const lone = row({ label: 'lone', route: 'anthropic', judge: null, runnable: false });
+    expect(pickProfiles([lone], baseline).best.anthropic.note).toBe('');
   });
 });
 

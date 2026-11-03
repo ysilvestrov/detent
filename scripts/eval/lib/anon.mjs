@@ -1,6 +1,6 @@
 // Strips a run down to what the blind grader may see, and maps the grader's scores back through the key.
 import { randomUUID } from 'node:crypto';
-import { isScorable } from './records.mjs';
+import { isScorable, judgeId } from './records.mjs';
 
 const BASE_FIELDS = ['file', 'line', 'severity', 'confidence', 'quote', 'claim', 'whyItBreaks'];
 const VERIFY_FIELDS = ['verdict', 'evidence'];
@@ -43,9 +43,9 @@ const mentionsOwnName = (run, findings) =>
 /** Batches that hold more than one item per label and draw: batch 1 a find and a verify, batches 104 and 106 several judges. */
 const MULTI_ITEM_BATCHES = [1, 104, 106];
 
-/** In those batches a verify or whole run is keyed as `label@verifyModel`, so the scores do not collide. */
+/** In those batches a verify or whole run is keyed as `label@judge`, by the judge's id, so the scores do not collide. */
 const keyLabel = (run) =>
-  MULTI_ITEM_BATCHES.includes(run.batch) && (run.mode === 'verify' || run.mode === 'whole') && run.verifyModel ? `${run.label}@${run.verifyModel}` : run.label;
+  MULTI_ITEM_BATCHES.includes(run.batch) && (run.mode === 'verify' || run.mode === 'whole') && run.verifyModel ? `${run.label}@${judgeId(run.verifyModel)}` : run.label;
 
 /**
  * `runs` are `run` lines; `read(findingsFile)` returns the saved findings of a find.
@@ -81,6 +81,7 @@ function checkScore(id, value, isCorpus) {
   const bad = (what) => {
     throw new Error(`anonymize: item ${id}: ${what}`);
   };
+  if (value === null || typeof value !== 'object') bad('the score must be an object');
   if (isCorpus) {
     for (const name of CORPUS_COUNTS) if (!Number.isFinite(value[name])) bad(`${name} must be a number`);
     return;

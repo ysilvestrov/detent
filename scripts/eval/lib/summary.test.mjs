@@ -475,6 +475,92 @@ describe('summarize: a pair with no corpus run of its own', () => {
   });
 });
 
+describe('summarize: one judge across routes', () => {
+  const judged = (batch, judge, mode, pr, provider, over = {}) => run({ batch, mode, verifyModel: judge, pr, provider, key: `${batch}|${mode}|alpha|${pr}|1|${judge}`, ...over });
+  const lines = [
+    judged(7, 'gpt-5.5', 'verify', '418', 'openai', { results: [{ verdict: 'refuted' }] }),
+    judged(101, 'openai/gpt-5.5', 'whole', '930', 'openrouter', { results: [{ verdict: 'confirmed' }] }),
+    judged(103, 'openai/gpt-5.5', 'whole', '344', 'openrouter'),
+    call({ stage: 'verify', key: '7|verify|alpha|418|1|gpt-5.5', requestedModel: 'gpt-5.5', usage: { cost: 0.25 } }),
+    call({ stage: 'verify', key: '101|whole|alpha|930|1|openai/gpt-5.5', requestedModel: 'openai/gpt-5.5', usage: { cost: 0.125 } }),
+  ];
+  const counts = { real: 2, false: 0, unfalsifiable: 0, published: 2 };
+  const scores = {
+    batches: {
+      7: { alpha: { 1: score(['D1', 'D2'], { pr: '418' }) } },
+      101: { alpha: { 1: score(['D1'], { pr: '930' }) } },
+      103: { alpha: { 1: { corpus: { 344: counts } } } },
+    },
+    judges: { 'gpt-5.5': 15, 'openai/gpt-5.5': 3 },
+  };
+  const rows = summarize({ lines, catalog, scores, cacheRuleApplies: false });
+
+  it('makes one row of them, named by the stripped id', () => {
+    expect(rows.map((r) => [r.judge, r.pair])).toEqual([['gpt-5.5', 'vendor/alpha + gpt-5.5']]);
+  });
+
+  it('keeps the published median, #930 and the corpus on that row', () => {
+    const [r] = rows;
+    expect([r.medianPublished, r.medianRecall930, r.corpus.prs, r.corpusFrom]).toEqual([2, 1, 1, null]);
+  });
+
+  it('reads the consensus under the stripped id', () => {
+    expect(rows[0].judgeConsensus).toBe(15);
+  });
+
+  it('adds up what the judge cost through both routes, and its verdicts', () => {
+    expect([rows[0].paidUsd, rows[0].refutedMean]).toEqual([0.375, 0.5]);
+  });
+
+  it('goes by the served model on a verify call with no requestedModel', () => {
+    const bare = call({ stage: 'verify', key: '7|verify|alpha|418|1|gpt-5.5', requestedModel: undefined, model: 'openai/gpt-5.5', usage: { cost: 0.25 } });
+    const [r] = summarize({ lines: [lines[0], bare], catalog, scores: noScores, cacheRuleApplies: false });
+    expect(r.paidUsd).toBe(0.25);
+  });
+
+  it('finds a score of a multi-item batch under the stripped id', () => {
+    const whole = judged(106, 'openai/gpt-5.5', 'whole', '418', 'openrouter');
+    const [r] = summarize({ lines: [whole], catalog, scores: { batches: { 106: { 'alpha@gpt-5.5': { 1: score(['D1'], { pr: '418' }) } } }, judges: {} }, cacheRuleApplies: false });
+    expect(r.medianPublished).toBe(1);
+  });
+});
+
+describe('summarize: is the pair runnable through one provider', () => {
+  const judged = (batch, mode, provider, over = {}) => run({ batch, mode, provider, verifyModel: 'gpt-5.5', key: `${batch}|${mode}|alpha|418|1|gpt-5.5`, ...over });
+  const runnableOf = (lines) => summarize({ lines, catalog, scores: noScores, cacheRuleApplies: false })[0].runnable;
+
+  it('is not when the judge only went through another route', () => {
+    expect(runnableOf([judged(7, 'verify', 'openai')])).toBe(false);
+  });
+
+  it('is once a whole run went through the route of the finder', () => {
+    expect(runnableOf([judged(7, 'verify', 'openai'), judged(106, 'whole', 'openrouter')])).toBe(true);
+  });
+
+  it('is not on a whole run that died', () => {
+    expect(runnableOf([judged(7, 'verify', 'openai'), judged(106, 'whole', 'openrouter', { exit: 5, error: 'boom' })])).toBe(false);
+  });
+
+  it('is not for a finder with no judge', () => {
+    expect(runnableOf([run({})])).toBe(false);
+  });
+});
+
+describe('summarize: a child that died before it wrote its line', () => {
+  const dead = (judge) => run({ batch: 7, mode: 'verify', verifyModel: null, key: `7|verify|alpha|418|1|${judge}`, exit: 5, error: 'killed', results: null });
+
+  it('counts for the pair its key names', () => {
+    const clean = run({ batch: 7, mode: 'verify', verifyModel: 'j2', key: '7|verify|alpha|418|2|j2', draw: 2 });
+    const rows = summarize({ lines: [dead('j1'), clean], catalog, scores: noScores, cacheRuleApplies: false });
+    expect(rows.map((r) => [r.judge, r.brokenCalls, r.composite])).toEqual([['j1', 1, true], ['j2', 0, false]]);
+  });
+
+  it('takes the stripped id from the key too', () => {
+    const [row] = summarize({ lines: [dead('openai/gpt-5.5')], catalog, scores: noScores, cacheRuleApplies: false });
+    expect([row.judge, row.brokenCalls]).toEqual(['gpt-5.5', 1]);
+  });
+});
+
 describe('summarize: what breaks a pair', () => {
   const brokenOf = (lines) => rowOf(summarize({ lines, catalog, scores: noScores, cacheRuleApplies: false }), 'alpha').brokenCalls;
 

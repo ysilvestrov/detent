@@ -9,7 +9,7 @@
 //                    `applyKey` writes it on the label's draw 1 of batch 102, 103 or 105 from the grader's per-item fields.
 //                    Batch 105 (generic prompts) is its own row, `<baseline> (generic prompts)`, and is never a profile.
 //                    In batches 1, 104 and 106 a verify or whole run is scored under `<label>@<judge>`, a find under the plain label.
-//   judges.json      {judgeModel: consensus}: how many of 15 the judge got right at `verify-corpus` by consensus.
+//   judges.json      {judge: consensus}: how many of 15 the judge got right at `verify-corpus` by consensus, under its id with no vendor prefix.
 //
 // Which scores are which: find-stage D-scores are batches 1-6 under the plain label; published ones are batches 7 and 101
 // under the plain label, and batches 1, 104 and 106 under `<label>@<judge>`.
@@ -19,9 +19,11 @@
 // `refutedMean`, `errorShare`, the judge cost and the consensus belong to the pair. So does the corpus when the pair ran it;
 // a pair with no corpus run takes the counts of its finder's pair that has one, and `corpusFrom` names that judge. A finder
 // with no judge yet has one row with `judge: null`. `composite` is true only when the row's judge did not verify this finder.
+// A row's judge is the id with no vendor prefix, so `gpt-5.5` and `openai/gpt-5.5` are one row; run lines keep what really ran.
+// `runnable` says a clean run put that judge through the finder's own route: without one, nobody can configure the pair.
 import { planBatch } from './batches.mjs';
 import { priceOf } from './catalog.mjs';
-import { callUsd, isScorable } from './records.mjs';
+import { callUsd, isScorable, judgeId } from './records.mjs';
 import { isUnstable } from './selection.mjs';
 
 const SEP = '|';
@@ -53,8 +55,11 @@ const batchOf = (line) => line.batch ?? Number(keyParts(line)[0]);
 export const prOf = (line) => keyParts(line)[3];
 
 const isVerifying = (run) => run.mode === 'verify' || run.mode === 'whole';
-/** The judge of a run; a find has none. */
-const judgeOf = (run) => (isVerifying(run) ? run.verifyModel ?? null : null);
+/** The judge of a run, from the key when a dead child left no `verifyModel` on its line; a find has none. */
+const judgeOf = (run) => {
+  const model = isVerifying(run) ? run.verifyModel ?? keyParts(run)[5] : undefined;
+  return model === undefined ? null : judgeId(model);
+};
 /** A call of the setup's verify probe: not part of any pair's own runs. */
 const isSetupVerify = (line) => batchOf(line) === SETUP_BATCH && (line.stage === 'verify' || line.mode === 'verify');
 
@@ -305,7 +310,7 @@ export function summarize({ lines, catalog, scores, cacheRuleApplies }) {
       const ownCorpus = corpusOf({ entry, judge, scores, closed });
       const inherited = ownCorpus.prs === 0 && corpusRun !== null;
       const mine = judged.filter((r) => judgeOf(r) === judge);
-      const pairCalls = calls.filter((c) => c.stage !== 'verify' || (judge !== null && c.requestedModel === judge));
+      const pairCalls = calls.filter((c) => c.stage !== 'verify' || (judge !== null && judgeId(c.requestedModel ?? c.model) === judge));
       const pairRuns = runs.filter((r) => !isVerifying(r) || judgeOf(r) === judge);
 
       const published = publishedOf({ entry, judge, scores, closed });
@@ -338,6 +343,7 @@ export function summarize({ lines, catalog, scores, cacheRuleApplies }) {
         composite: !mine.some(isScorable),
         corpus: inherited ? corpusOf({ entry, judge: corpusRun, scores, closed }) : ownCorpus,
         corpusFrom: inherited ? corpusRun : null,
+        runnable: mine.some((r) => isScorable(r) && r.provider === entry.route),
         judgeConsensus: judge === null ? null : scores.judges?.[judge] ?? null,
         brokenCalls: brokenCount({ calls: pairCalls, runs: pairRuns }),
         medianRecall930: median(publishedOn('930').map((e) => e.value.defects.length)),
