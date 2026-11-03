@@ -282,6 +282,24 @@ describe('callStructured: onResponse', () => {
     expect(seen[0]!.contentLength).toBe(0);
   });
 
+  it('fails at once, without a retry, when the hook throws', async () => {
+    let fetches = 0;
+    let hookCalls = 0;
+    const fetchFn = (async () => {
+      fetches++;
+      return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: 'abc' } }] }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+    const onResponse = () => {
+      hookCalls++;
+      throw new Error('disk full');
+    };
+    const err = (await callStructured({ ...deps(fetchFn), onResponse }, msgs, fmt).catch((e) => e)) as Error;
+    expect(err).toBeInstanceOf(NonRetryableError);
+    expect(err.message).toContain('disk full');
+    expect(fetches).toBe(1);
+    expect(hookCalls).toBe(1);
+  });
+
   it('gives null for the fields a response leaves out', async () => {
     const seen: CallInfo[] = [];
     const fetchFn = respond({ choices: [{ message: { content: 'a' } }] });
