@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ensureHeadCommit, resolveReplayArgs, resolveReplayBase } from './replay.js';
+import { ensureHeadCommit, formatContextBudget, resolveReplayArgs, resolveReplayBase } from './replay.js';
 
 describe('resolveReplayArgs', () => {
   it('reads a bare PR number', () => {
@@ -53,6 +53,36 @@ describe('resolveReplayArgs', () => {
 
   it('names the providers when --provider is not one of them', () => {
     expect(() => resolveReplayArgs(['418', '--provider', 'x'])).toThrow('openai|anthropic|openrouter');
+  });
+
+  it('takes --record with a file path', () => {
+    expect(resolveReplayArgs(['418', '--record', 'r.jsonl'])).toEqual({ pr: '418', record: 'r.jsonl' });
+  });
+
+  it('rejects --record with no path', () => {
+    expect(() => resolveReplayArgs(['418', '--record'])).toThrow('--record needs a file path');
+  });
+
+  it('takes --context-only, which has no value', () => {
+    expect(resolveReplayArgs(['418', '--context-only'])).toEqual({ pr: '418', contextOnly: true });
+  });
+
+  it('rejects --context-only together with --record', () => {
+    expect(() => resolveReplayArgs(['418', '--context-only', '--record', 'r'])).toThrow(
+      '--context-only cannot be combined with --record',
+    );
+  });
+});
+
+describe('formatContextBudget', () => {
+  it('names the files sent as diff only', () => {
+    expect(formatContextBudget(['a.test.ts', 'b.test.ts'])).toBe(
+      'Context budget: 2 file(s) sent as diff only: a.test.ts, b.test.ts',
+    );
+  });
+
+  it('says so when every file went in whole', () => {
+    expect(formatContextBudget([])).toBe('Context budget: 0 file(s) sent as diff only.');
   });
 });
 

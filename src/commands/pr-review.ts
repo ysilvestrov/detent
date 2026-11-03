@@ -10,7 +10,7 @@ import { ConfigError, baseReader, loadSettings } from '../pr-review/settings.js'
 
 export { EXIT };
 
-export const USAGE = 'Usage: npx -y @ysilvestrov/detent pr-review [--replay <pr> [--head <sha>] [--base <sha>] [--provider <id>]]';
+export const USAGE = 'Usage: npx -y @ysilvestrov/detent pr-review [--replay <pr> [--head <sha>] [--base <sha>] [--provider <id>] [--record <file> | --context-only]]';
 
 export type PrReviewIo = ReplayIo;
 
