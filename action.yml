@@ -1,0 +1,50 @@
+name: detent pr-review
+description: AI review of a pull request by a configured pair of models. The code of the PR is not run.
+
+inputs:
+  openai-api-key:
+    description: Key for the openai provider.
+    required: false
+  anthropic-api-key:
+    description: Key for the anthropic provider.
+    required: false
+  openrouter-api-key:
+    description: Key for the openrouter provider.
+    required: false
+  github-token:
+    description: Token that publishes the review. A bot token, or the review state is lost; see the README.
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    # The default ref of pull_request is a merge commit: the stored head would never be its ancestor,
+    # and every run would silently become a full review.
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 0
+        persist-credentials: false
+
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 24
+
+    # The package comes from npm, this file from git: the version is read from the same revision.
+    # No secrets in this step, and outside the checkout so that an .npmrc of the PR has no say.
+    - name: Install
+      shell: bash
+      working-directory: ${{ runner.temp }}
+      run: |
+        version="$(node -p "require(process.env.GITHUB_ACTION_PATH + '/package.json').version")"
+        npm i --prefix "$RUNNER_TEMP/detent" --ignore-scripts --no-audit --no-fund "@ysilvestrov/detent@$version"
+
+    - name: Review
+      shell: bash
+      env:
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        OPENROUTER_API_KEY: ${{ inputs.openrouter-api-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: node "$RUNNER_TEMP/detent/node_modules/@ysilvestrov/detent/dist/cli.js" pr-review

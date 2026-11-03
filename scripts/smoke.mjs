@@ -90,6 +90,10 @@ for (const dir of ['skills', 'prompts', 'constitution']) {
 }
 requireFile(installed, 'dist/pr-review/index.d.ts', 'the installed package');
 console.log('smoke: ok: the package has every file of skills, prompts and constitution');
+// The Action comes from git and the code from npm: the archive does not carry action.yml.
+requireFile(root, 'action.yml', 'the repository');
+if (existsSync(join(installed, 'action.yml'))) fail('the installed package has action.yml');
+console.log('smoke: ok: action.yml is in the repository and not in the package');
 
 const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 detent(['--version'], { code: 0, stdout: (out) => out.trim() === version });
