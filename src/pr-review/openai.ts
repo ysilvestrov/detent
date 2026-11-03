@@ -152,15 +152,20 @@ async function request(
       };
       const content = data.choices?.[0]?.message?.content;
       // Before the empty-content check: that call was billed too. A throw from the hook is
-      // not caught here on purpose — a failed write must be seen, not swallowed.
-      deps.onResponse?.({
-        id: data.id ?? null,
-        model: data.model ?? null,
-        provider: data.provider ?? null,
-        finishReason: data.choices?.[0]?.finish_reason ?? null,
-        contentLength: content?.length ?? 0,
-        usage: data.usage ?? null,
-      });
+      // not swallowed — a failed write must be seen — but it is not retried either: the call
+      // is already paid for, and a retry would pay again and call the hook twice.
+      try {
+        deps.onResponse?.({
+          id: data.id ?? null,
+          model: data.model ?? null,
+          provider: data.provider ?? null,
+          finishReason: data.choices?.[0]?.finish_reason ?? null,
+          contentLength: content?.length ?? 0,
+          usage: data.usage ?? null,
+        });
+      } catch (hookErr) {
+        throw new NonRetryableError(`${name} response hook failed: ${String(hookErr)}`, parseUsage(data.usage));
+      }
       if (!content) {
         // Measured in production 2026-09-23 (warsaw-beer-bot#691): a reasoning model can spend the
         // whole `max_completion_tokens` budget thinking and emit no content. The call
