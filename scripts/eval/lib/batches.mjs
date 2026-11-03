@@ -29,6 +29,17 @@ export function savedFindings(lines) {
   return saved;
 }
 
+/** `label/pr/draw` of every find that left any line, a call of a killed one included. */
+export function startedFinds(lines) {
+  const started = new Set();
+  for (const line of lines) {
+    if (typeof line.key !== 'string') continue;
+    const [, mode, label, pr, draw] = line.key.split(SEP);
+    if (mode === 'find') started.add(`${label}/${pr}/${draw}`);
+  }
+  return started;
+}
+
 /** Skip a run that closed clean (an expected failure: any `run` line); otherwise run, numbering the attempt. */
 export function nextAction(run, lines) {
   const key = runKey(run);

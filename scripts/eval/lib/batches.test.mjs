@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { admit, nextAction, planBatch, runKey, savedFindings } from './batches.mjs';
+import { admit, nextAction, planBatch, runKey, savedFindings, startedFinds } from './batches.mjs';
 import { loadCatalog } from './catalog.mjs';
 
 const text = readFileSync(new URL('../candidates.json', import.meta.url), 'utf8');
@@ -304,5 +304,15 @@ describe('savedFindings', () => {
     const [, verify] = planBatch({ batch: 1, catalog });
     const lines = [{ type: 'run', key: runKey(verify), attempt: 1, exit: 0, error: null, findingsFile: 'v.json' }];
     expect(savedFindings(lines)).toEqual(new Map());
+  });
+});
+
+describe('startedFinds', () => {
+  const [find] = planBatch({ batch: 1, catalog });
+  const key = runKey(find);
+
+  it('lists the finds that have any line, a call of a killed one too', () => {
+    const lines = [{ type: 'call', key, attempt: 1 }, { type: 'run', key: '7|verify|x|418|2|gpt-5.5', attempt: 1 }, { type: 'call' }];
+    expect(startedFinds(lines)).toEqual(new Set(['gpt-5.6-sol/418/1']));
   });
 });

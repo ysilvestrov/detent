@@ -76,3 +76,23 @@ describe('checkLabels', () => {
     expect(checkLabels({ batch: 2, labels: [], scoresByBatch: {} })).toBe(null);
   });
 });
+
+describe('checkLabels batch 7', () => {
+  const scoresByBatch = { 2: { a: { 1: score(['D1']) } }, 5: { b: { 1: score(['D1']) } } };
+
+  it('accepts labels scored in any of batches 2-6', () => {
+    expect(checkLabels({ batch: 7, labels: ['a', 'b'], scoresByBatch })).toBe(null);
+  });
+
+  it('names a label with no score in any of them', () => {
+    expect(checkLabels({ batch: 7, labels: ['a', 'c'], scoresByBatch })).toBe('batch 7: c has no score in batches 2-6');
+  });
+
+  it('ignores the scores of other batches', () => {
+    expect(checkLabels({ batch: 7, labels: ['a'], scoresByBatch: { 1: { a: { 1: score(['D1']) } } } })).toBe('batch 7: a has no score in batches 2-6');
+  });
+
+  it('leaves the scores of batches 101-106 out of the rule', () => {
+    expect(checkLabels({ batch: 101, labels: ['z'], scoresByBatch: {} })).toBe(null);
+  });
+});

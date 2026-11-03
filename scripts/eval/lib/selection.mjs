@@ -3,6 +3,8 @@
 const MIN_DEFECTS = 2;
 const MAX_LABELS_BATCH_7 = 5;
 const MAX_LABELS_BATCH_101 = 2;
+/** The batches whose scores qualify a label for batch 7. Batch 6 is not required: the ceiling can cut it. */
+const SCORED_FOR_7 = [2, 3, 4, 5, 6];
 /** The batch whose scores decide who runs in a batch. */
 const SCORED_BEFORE = { 4: 3, 6: 5 };
 
@@ -38,6 +40,11 @@ export function checkLabels({ batch, labels, scoresByBatch }) {
     if (dropped.length > 0) return `batch ${batch}: ${dropped.join(', ')} did not survive batch ${before}`;
   }
   if (batch === 7 && labels.length > MAX_LABELS_BATCH_7) return `batch 7 takes at most ${MAX_LABELS_BATCH_7} labels, got ${labels.length}`;
+  if (batch === 7) {
+    const scored = new Set(SCORED_FOR_7.flatMap((b) => Object.keys(scoresByBatch[b] ?? {})));
+    const unscored = labels.filter((label) => !scored.has(label));
+    if (unscored.length > 0) return `batch 7: ${unscored.join(', ')} has no score in batches 2-6`;
+  }
   if (batch === 101 && labels.length > MAX_LABELS_BATCH_101) return `batch 101 takes at most ${MAX_LABELS_BATCH_101} labels, got ${labels.length}`;
   return null;
 }
