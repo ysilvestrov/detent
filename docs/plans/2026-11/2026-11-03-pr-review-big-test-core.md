@@ -37,7 +37,7 @@
 
 **Файли:**
 - Змінити: `src/pr-review/openai.ts`
-- Тест: `src/pr-review/openai.test.ts`
+- Тест: `src/pr-review/openai.test.ts`, `src/pr-review/review.test.ts`
 
 **Інтерфейси:**
 - Створює: `export interface CallInfo { id: string | null; model: string | null; provider: string | null; finishReason: string | null; contentLength: number; usage: unknown }` і необов'язкове поле `OpenAiDeps.onResponse?: (info: CallInfo) => void`.
@@ -62,6 +62,16 @@ it('sends only the standard fields when there is no extraBody', async () => {
 ```
 
 Відсутні в відповіді поля дають `null` (перевірити одним тестом на `{choices:[{message:{content:'a'}}]}`).
+
+Закріплення шляху CI в `review.test.ts`, зі стабом `capture` поруч із рядком 460. Цей тест проходить уже до зміни, бо фіксує теперішні тіла:
+```ts
+it('sends the same find and verify bodies as before the replay flags', async () => {
+  // runReview with deps({ openaiFetch: capture, ... }): for each captured request body string,
+  expect(Object.keys(JSON.parse(body))).toEqual(['model', 'max_completion_tokens', 'response_format', 'messages']);
+  expect(JSON.stringify(JSON.parse(body))).toBe(body);
+  // toEqual on the whole find body and the whole verify body, with the values the test's fixture produces
+});
+```
 
 - [ ] **Крок 2:** `npx vitest run src/pr-review/openai.test.ts` — падає: `onResponse` не викликається.
 
@@ -101,7 +111,7 @@ it('returns 2 before any model call when the record file cannot be opened', ...)
 it('prints the context budget line', ...)  // out contains 'Context budget: 0 file(s) sent as diff only.'
 it('context-only prints the budget and calls no model, with no key at all', ...)  // env {}; code 0; fetch bodies: []
 ```
-Тест імен файлів: контекст із файлом поза бюджетом перевіряти не треба, `buildReviewContext` це вже покриває; рядок для ненульового списку: `Context budget: 2 file(s) sent as diff only: a.test.ts, b.test.ts`.
+Імена файлів у `replay.test.ts`, на чистій функції `export function formatContextBudget(diffOnly: string[]): string`: `formatContextBudget(['a.test.ts','b.test.ts'])` дає `Context budget: 2 file(s) sent as diff only: a.test.ts, b.test.ts`, а `formatContextBudget([])` дає `Context budget: 0 file(s) sent as diff only.`
 
 - [ ] **Крок 2:** `npx vitest run src/pr-review/replay` — падає.
 
@@ -134,6 +144,8 @@ expect(stageExtraBody({ provider: PROVIDERS.openrouter, model: 'm', only: ' ', c
   .toEqual({ provider: { require_parameters: true } });
 expect(stageExtraBody({ provider: PROVIDERS.openai, model: 'gpt-5.6-sol', only: undefined, cacheOff: true, cacheOffModels: 'gpt-5.6-sol, gpt-6.1-sol' }))
   .toEqual({ prompt_cache_options: { mode: 'explicit' } });
+expect(stageExtraBody({ provider: PROVIDERS.openrouter, model: 'gpt-5.6-sol', only: 'azure', cacheOff: true, cacheOffModels: 'gpt-5.6-sol' }))
+  .toEqual({ provider: { only: ['azure'], allow_fallbacks: false, require_parameters: true }, prompt_cache_options: { mode: 'explicit' } });
 expect(stageExtraBody({ provider: PROVIDERS.openai, model: 'gpt-5.5', only: undefined, cacheOff: true, cacheOffModels: 'gpt-5.6-sol' }))
   .toBeUndefined();
 expect(stageExtraBody({ provider: PROVIDERS.openai, model: 'gpt-5.6-sol', only: undefined, cacheOff: true, cacheOffModels: undefined }))
@@ -191,7 +203,7 @@ it('verify-from records verify calls and a run line with raised and gated from t
 - [ ] **Крок 3:** реалізувати:
   - після `applyGate` `--find-only` зберігає файл, друкує `raised N → gated M`, зниклі знахідки, рядок витрат і завершується кодом 0;
   - перевірку й друк із `runReplay` винести у внутрішню функцію, спільну для обох шляхів;
-  - `--verify-from` читає файл до вибору постачальника: помилка читання, інший `pr` чи `scope` — код 2. Голова береться з файла; вона має бути в клоні через `ensureHeadCommit`, але `gh` не викликається, тому `fetchHead` для цього шляху — `git fetch origin <head>`;
+  - `--verify-from` читає файл до вибору постачальника: помилка читання, інший `pr` чи `scope` — код 2. Голова береться з файла; вона береться в клон тим самим `ensureHeadCommit` і `fetchHead`, що для явного `--head` (спершу `pull/<n>/head` без падіння, потім за sha). `gh` не викликається. У рядку `run` `diffOnly` порожній, бо контекст не будується;
   - `resolveModels` у `--find-only` отримує `verifyModel` рівний моделі пошуку, у `--verify-from` `findModel` рівний `saved.findModel`: потрібна лише одна модель, а постачальник може не мати типових;
   - ID запитів перевірки такі самі, як у звичайному запуску (`f<i>`).
 
