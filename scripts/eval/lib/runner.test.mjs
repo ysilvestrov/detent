@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -214,7 +214,7 @@ describe('runBatch', () => {
     const result = await runBatch({ ...s.common, runs: [run()], spawnRun });
     expect(result).toEqual({ code: 5, spentUsd: 0.1, done: 0, failed: 1, left: 0, notApplicable: 0 });
     const lines = parseRecords(readFileSync(s.shared(3), 'utf8'));
-    expect(lines[0]).toEqual({ ...callLine(0.1), requestedModel: 'm-find', key: '3|find|a|418|1', mode: 'find', attempt: 1, expectFailure: false, findingsFile: null });
+    expect(lines[0]).toEqual({ ...callLine(0.1), tempId: expect.any(String), requestedModel: 'm-find', key: '3|find|a|418|1', mode: 'find', attempt: 1, expectFailure: false, findingsFile: null });
     expect(lines[1]).toMatchObject({ type: 'run', exit: 137, error: 'the child ended with exit 137 and wrote no run line', attempt: 1, findingsFile: null });
     expect(lines).toHaveLength(2);
   });
@@ -224,8 +224,8 @@ describe('runBatch', () => {
     const { spawnRun } = stub([ok(0.1)]);
     await runBatch({ ...s.common, runs: [run()], spawnRun });
     expect(parseRecords(readFileSync(s.shared(3), 'utf8'))).toEqual([
-      { ...callLine(0.1), requestedModel: 'm-find', key: '3|find|a|418|1', mode: 'find', attempt: 1, expectFailure: false, findingsFile: null },
-      { ...runLine(), requestedModel: 'm-find', key: '3|find|a|418|1', mode: 'find', attempt: 1, expectFailure: false, findingsFile: 'findings/b3-a-pr418-d1-a1-find.json' },
+      { ...callLine(0.1), tempId: expect.any(String), requestedModel: 'm-find', key: '3|find|a|418|1', mode: 'find', attempt: 1, expectFailure: false, findingsFile: null },
+      { ...runLine(), tempId: expect.any(String), requestedModel: 'm-find', key: '3|find|a|418|1', mode: 'find', attempt: 1, expectFailure: false, findingsFile: 'findings/b3-a-pr418-d1-a1-find.json' },
     ]);
   });
 
@@ -546,6 +546,44 @@ describe('runBatch with an orphaned temp record', () => {
     const again = await runBatch({ ...s.common, ceilingUsd: 0.6, runs: [run({ draw: 2 })], spawnRun: stub([]).spawnRun });
     expect(again.spentUsd).toBe(0.3);
     expect(readdirSync(s.common.tmpDir).filter((name) => name.endsWith('.absorbed'))).toEqual(['dead.absorbed']);
+  });
+
+  it('puts the id of the temp record on every line', async () => {
+    const s = setup();
+    orphan(s);
+    await runBatch({ ...s.common, ceilingUsd: 0.6, runs: [run({ draw: 2 })], spawnRun: stub([]).spawnRun });
+    expect(parseRecords(readFileSync(s.shared(3), 'utf8')).map((line) => line.tempId)).toEqual(['dead', 'dead']);
+  });
+
+  it('counts a run once after a crash between its append and its marker', async () => {
+    const s = setup();
+    await runBatch({ ...s.common, runs: [run()], spawnRun: stub([ok(0.1)]).spawnRun });
+    const [marker] = readdirSync(s.common.tmpDir).filter((name) => name.endsWith('.absorbed'));
+    renameSync(join(s.common.tmpDir, marker), join(s.common.tmpDir, 'never-written'));
+    const next = stub([]);
+    const result = await runBatch({ ...s.common, runs: [run()], spawnRun: next.spawnRun });
+    expect(next.calls).toHaveLength(0);
+    expect(result).toEqual({ code: 0, spentUsd: 0.1, done: 1, failed: 0, left: 0, notApplicable: 0 });
+    expect(parseRecords(readFileSync(s.shared(3), 'utf8')).map((line) => line.type)).toEqual(['call', 'run']);
+  });
+
+  it('adds only the run line after a crash between the calls and the run line', async () => {
+    const s = setup();
+    orphan(s);
+    mkdirSync(join(s.dir, 'records'), { recursive: true });
+    writeFileSync(s.shared(3), jsonl({ ...callLine(0.3), tempId: 'dead', key: '3|find|a|418|1', attempt: 1 }));
+    const result = await runBatch({ ...s.common, ceilingUsd: 0.6, runs: [run({ draw: 2 })], spawnRun: stub([]).spawnRun });
+    expect(result.spentUsd).toBe(0.3);
+    expect(parseRecords(readFileSync(s.shared(3), 'utf8')).map((line) => [line.type, line.tempId])).toEqual([['call', 'dead'], ['run', 'dead']]);
+  });
+
+  it('does not take a line of another temp record for its own', async () => {
+    const s = setup();
+    orphan(s);
+    mkdirSync(join(s.dir, 'records'), { recursive: true });
+    writeFileSync(s.shared(3), jsonl({ ...callLine(0.1), tempId: 'other', key: '3|find|a|418|1', attempt: 1 }));
+    const result = await runBatch({ ...s.common, ceilingUsd: 0.6, runs: [run({ draw: 2 })], spawnRun: stub([]).spawnRun });
+    expect(result.spentUsd).toBe(0.4);
   });
 
   it('leaves the files of an absorbed run alone', async () => {

@@ -122,6 +122,8 @@ const tail = (text) => text.trim().split('\n').filter(Boolean).slice(-STDERR_TAI
  * Moves the lines of one temp record into the shared record, scrubbed and enriched. The `call` lines go first, so a
  * failure after them cannot lose paid calls; the findings copy comes next, and the `run` line closes the run last.
  * A run the child did not close properly gets a failed `run` line of the funnel's own.
+ * Every line carries `tempId`, so a crash before the `.absorbed` marker repeats nothing: the next absorb skips the `call`
+ * lines as a group, and the `run` line on its own, when the shared record already has them.
  * `childCode` is null for an orphan, whose child's exit was never seen.
  */
 function absorb({ meta, recordPath, findingsPath, childCode, recordsDir, scrub }) {
@@ -135,6 +137,7 @@ function absorb({ meta, recordPath, findingsPath, childCode, recordsDir, scrub }
 
   const enrich = (line, findingsFile) => ({
     ...line,
+    tempId: meta.id,
     requestedModel: meta.models[line.type === 'call' ? line.stage : meta.mode === 'verify' ? 'verify' : 'find'],
     key: meta.key,
     mode: meta.mode,
@@ -143,7 +146,8 @@ function absorb({ meta, recordPath, findingsPath, childCode, recordsDir, scrub }
     findingsFile,
   });
   const shared = join(recordsDir, `batch-${meta.batch}.jsonl`);
-  appendLines(shared, lines.filter((line) => line.type !== 'run').map((line) => enrich(line, null)));
+  const present = salvage(existsSync(shared) ? readFileSync(shared, 'utf8') : '').lines.filter((line) => line.tempId === meta.id);
+  if (!present.some((line) => line.type !== 'run')) appendLines(shared, lines.filter((line) => line.type !== 'run').map((line) => enrich(line, null)));
 
   let clean = problem === null && isScorable(closing);
   let findingsFile = null;
@@ -157,7 +161,7 @@ function absorb({ meta, recordPath, findingsPath, childCode, recordsDir, scrub }
       clean = false;
     }
   }
-  if (closing !== undefined || !meta.expectFailure) {
+  if (!present.some((line) => line.type === 'run') && (closing !== undefined || !meta.expectFailure)) {
     const base = closing ?? { type: 'run', runId: lines[0]?.runId ?? meta.id, batch: meta.batch, label: meta.label, provider: meta.route, pr: meta.pr, draw: meta.draw };
     const line = problem === null ? base : { ...base, exit: code ?? 1, error: problem === ORPHAN || closing === undefined || closing.error === null ? problem : closing.error };
     appendLines(shared, [enrich(line, findingsFile)]);

@@ -6,9 +6,9 @@
 //                      {defects: string[], findings: number, pr: string, corpus?: {pr: Corpus}}
 //                    `defects` are the ids the item found, D1-D5 on #418 and R1-R3 on #930, confirmed results only for a verify or whole run; `pr` is written by `applyKey` from the key, never taken from the grader (a score without one reads as "418");
 //                    `corpus` is {pr: {real, false, unfalsifiable, published}}, counts of the confirmed findings of each corpus PR;
-//                    `applyKey` writes it on the label's draw 1 of batch 102, 103 or 105 from the grader's per-item fields.
+//                    `applyKey` writes it on the label's draw 1 of batch 102 or 105, and on `<label>@<judge>`'s draw 1 of batch 103, from the grader's per-item fields.
 //                    Batch 105 (generic prompts) is its own row, `<baseline> (generic prompts)`, and is never a profile.
-//                    In batches 1, 104 and 106 a verify or whole run is scored under `<label>@<judge>`, a find under the plain label.
+//                    In batches 1, 103, 104 and 106 a verify or whole run is scored under `<label>@<judge>`, a find under the plain label.
 //   judges.json      {judge: consensus}: how many of 15 the judge got right at `verify-corpus` by consensus, under its id with no vendor prefix.
 //
 // Which scores are which: find-stage D-scores are batches 1-6 under the plain label; published ones are batches 7 and 101
@@ -21,6 +21,7 @@
 // with no judge yet has one row with `judge: null`. `composite` is true only when the row's judge did not verify this finder.
 // A row's judge is the id with no vendor prefix, so `gpt-5.5` and `openai/gpt-5.5` are one row; run lines keep what really ran.
 // `runnable` says a clean run put that judge through the finder's own route: without one, nobody can configure the pair.
+// `refutedMean` reads #418 only, the evidence batch 7 excludes on. `costUnknown` says a first run's call has no usable usage or price.
 import { planBatch } from './batches.mjs';
 import { priceOf } from './catalog.mjs';
 import { callUsd, isScorable, judgeId } from './records.mjs';
@@ -30,6 +31,8 @@ const SEP = '|';
 const KNOWN_DEFECTS = ['D1', 'D2', 'D3', 'D4', 'D5'];
 const FIND_BATCHES = [1, 2, 3, 4, 5, 6];
 const CORPUS_BATCHES = [102, 103];
+/** The finalists' corpus: its scores name the judge, because each judge can confirm other findings. */
+const JUDGED_CORPUS_BATCH = 103;
 /** Batch 105 measures the baseline with generic prompts, so it is a row of its own and joins no other. */
 const GENERIC_BATCH = 105;
 /** The setup: its verify is a probe that is meant to fail, and belongs to no pair. */
@@ -196,11 +199,12 @@ function firstRunUsd({ lines, catalog, label, judge, cacheRuleApplies }) {
   const firsts = lines.filter((l) => l.type === 'run' && isScorable(l) && !l.expectFailure && labelOf(l) === label && l.pr === DEFAULT_PR && l.draw === 1);
   const find = firsts.find((l) => l.mode === 'find' || l.mode === 'whole');
   const verify = firsts.find((l) => isVerifying(l) && judgeOf(l) === judge);
-  if (find === undefined && verify === undefined) return { production: null, judgePart: null };
+  if (find === undefined && verify === undefined) return { production: null, judgePart: null, unknown: false };
   const stageUsd = (run, stage) => {
     if (run === undefined) return 0;
     let total = 0;
-    for (const call of lines.filter((l) => l.type === 'call' && l.key === run.key && l.attempt === run.attempt && l.stage === stage && l.usage)) {
+    for (const call of lines.filter((l) => l.type === 'call' && l.key === run.key && l.attempt === run.attempt && l.stage === stage)) {
+      if (!call.usage) return null;
       const price = priceOf(catalog, call.requestedModel ?? call.model);
       if (!price) return null;
       total += productionUsd({ firstRunUsage: call.usage, price, cacheRuleApplies });
@@ -209,9 +213,11 @@ function firstRunUsd({ lines, catalog, label, judge, cacheRuleApplies }) {
   };
   const findPart = stageUsd(find, 'find');
   const judgePart = stageUsd(verify, 'verify');
+  const unknown = findPart === null || judgePart === null;
   return {
-    production: findPart === null || judgePart === null ? null : findPart + judgePart,
+    production: unknown ? null : findPart + judgePart,
     judgePart: verify === undefined ? null : judgePart,
+    unknown,
   };
 }
 
@@ -264,7 +270,8 @@ function corpusOf({ entry, judge, scores, closed }) {
   const corpus = { real: 0, false: 0, unfalsifiable: 0, published: 0, prs: 0 };
   const counted = new Set();
   for (const batch of generic ? [GENERIC_BATCH] : CORPUS_BATCHES) {
-    for (const [draw, value] of Object.entries(scores.batches[batch]?.[label] ?? {})) {
+    const scoreLabel = batch === JUDGED_CORPUS_BATCH ? `${label}@${judge}` : label;
+    for (const [draw, value] of Object.entries(scores.batches[batch]?.[scoreLabel] ?? {})) {
       for (const [pr, c] of Object.entries(value.corpus ?? {})) {
         if (counted.has(pr) || !closed.has(closedKey(batch, label, Number(draw), pr, judge))) continue;
         counted.add(pr);
@@ -320,8 +327,8 @@ export function summarize({ lines, catalog, scores, cacheRuleApplies }) {
 
       const verifies = mine.filter((r) => Array.isArray(r.results) && !catalog.corpus.includes(r.pr));
       const verdicts = verifies.flatMap((r) => r.results.map((x) => x.verdict));
-      const refutedPerRun = verifies.filter(isScorable).map((r) => r.results.filter((x) => x.verdict === 'refuted').length);
-      const { production, judgePart } = firstRunUsd({ lines: own, catalog, label, judge, cacheRuleApplies });
+      const refutedPerRun = verifies.filter((r) => isScorable(r) && r.pr === DEFAULT_PR).map((r) => r.results.filter((x) => x.verdict === 'refuted').length);
+      const { production, judgePart, unknown } = firstRunUsd({ lines: own, catalog, label, judge, cacheRuleApplies });
 
       return {
         label: generic ? `${label} (generic prompts)` : label,
@@ -340,6 +347,7 @@ export function summarize({ lines, catalog, scores, cacheRuleApplies }) {
         paidUsd: paidUsd(pairCalls, catalog),
         productionUsd: production,
         judgeUsd: judgePart,
+        costUnknown: unknown,
         composite: !mine.some(isScorable),
         corpus: inherited ? corpusOf({ entry, judge: corpusRun, scores, closed }) : ownCorpus,
         corpusFrom: inherited ? corpusRun : null,

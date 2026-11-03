@@ -65,6 +65,7 @@ function readScores(evalDir, from) {
 }
 
 const usd = (v) => (v === null ? '-' : `$${v.toFixed(2)}`);
+const production = (r) => (r.costUnknown ? 'unknown' : usd(r.productionUsd));
 const num = (v) => (v === null ? '-' : String(v));
 const pct = (v) => (v === null ? '-' : `${Math.round(v * 100)}%`);
 /** `null` when nothing is scored yet; an empty list when nothing is missing. */
@@ -82,7 +83,7 @@ function configTable(rows) {
     const flags = [r.composite ? 'composite' : '', r.unstable ? 'unstable' : '', r.dropped ? 'dropped' : ''].filter(Boolean).join(', ');
     const publishedUnion = r.missedPublished === null ? null : r.publishedDefects;
     out.push(
-      `| ${r.label} | ${r.route} | ${r.pair} | ${r.draws} | ${r.perDraw.join('/')} | ${num(r.medianKnown)} | ${r.union} | ${ids(r.missedFind)} | ${num(r.medianPublished)} | ${ids(publishedUnion)} | ${ids(r.missedPublished)} | ${num(r.medianRecall930)} | ${num(r.refutedMean)} | ${pct(r.errorShare)} | ${usd(r.paidUsd)} | ${usd(r.productionUsd)} | ${flags} |`,
+      `| ${r.label} | ${r.route} | ${r.pair} | ${r.draws} | ${r.perDraw.join('/')} | ${num(r.medianKnown)} | ${r.union} | ${ids(r.missedFind)} | ${num(r.medianPublished)} | ${ids(publishedUnion)} | ${ids(r.missedPublished)} | ${num(r.medianRecall930)} | ${num(r.refutedMean)} | ${pct(r.errorShare)} | ${usd(r.paidUsd)} | ${production(r)} | ${flags} |`,
     );
   }
   return out;

@@ -24,6 +24,7 @@ const row = (over) => ({
   corpus: { real: 4, false: 0, unfalsifiable: 0, published: 4, prs: 5 },
   corpusFrom: null,
   runnable: true,
+  costUnknown: false,
   judgeConsensus: 15,
   brokenCalls: 0,
   medianRecall930: 2,
@@ -231,6 +232,21 @@ describe('balanced names what it gives up', () => {
   });
 });
 
+describe('a row whose cost is unknown', () => {
+  const unknown = row({ label: 'dark', route: 'anthropic', medianPublished: 5, productionUsd: null, judgeUsd: null, costUnknown: true });
+  const priced = row({ label: 'lit', route: 'anthropic', medianPublished: 3, productionUsd: 9 });
+
+  it('is preliminary, with the note, and with no estimate of the judge', () => {
+    const cell = pickProfiles([unknown], baseline).best.anthropic;
+    expect([cell.row.label, cell.preliminary, cell.note]).toEqual(['dark', true, 'production cost unknown: a call reported no usage']);
+  });
+
+  it('sorts after a priced row in every profile, whatever its median', () => {
+    const picks = pickProfiles([unknown, priced], baseline);
+    expect([picks.best.anthropic.row.label, picks.balanced.anthropic.row.label, picks.value.anthropic.row.label]).toEqual(['lit', 'lit', 'lit']);
+  });
+});
+
 describe('a pair nobody can configure', () => {
   const foreign = row({ label: 'far', route: 'anthropic', runnable: false, medianPublished: 5 });
 
@@ -251,10 +267,10 @@ describe('a pair nobody can configure', () => {
 });
 
 describe('a pair with the corpus of its finder', () => {
-  it('is admitted on those counts, and the cell says whose they are', () => {
+  it('passes the admission on those counts, yet stays preliminary, and the cell says whose they are', () => {
     const inherited = row({ label: 'heir', route: 'anthropic', corpusFrom: 'other-judge' });
     const cell = pickProfiles([inherited], baseline).best.anthropic;
-    expect([admitted(inherited).ok, cell.row.label, cell.preliminary, cell.note]).toEqual([true, 'heir', false, "corpus counts from the finder's run with other-judge"]);
+    expect([admitted(inherited).ok, cell.row.label, cell.preliminary, cell.note]).toEqual([true, 'heir', true, "corpus counts from the finder's run with other-judge"]);
   });
 });
 

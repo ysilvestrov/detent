@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { anonymize, applyKey } from './anon.mjs';
+import { pickProfiles } from './profiles.mjs';
 import {
   anthropicCalls,
   anthropicThinking,
@@ -168,12 +169,12 @@ describe('summarize: verify', () => {
 describe('summarize: corpus, broken calls and production price', () => {
   it('sums the corpus classes over the corpus PRs whose runs closed', () => {
     const lines = [
-      run({ batch: 103, mode: 'whole', pr: '344', draw: 1 }),
-      run({ batch: 103, mode: 'whole', pr: '348', draw: 1 }),
-      run({ batch: 103, mode: 'whole', pr: '352', draw: 1, exit: 1, error: 'killed' }),
+      run({ batch: 103, mode: 'whole', verifyModel: 'j', pr: '344', draw: 1 }),
+      run({ batch: 103, mode: 'whole', verifyModel: 'j', pr: '348', draw: 1 }),
+      run({ batch: 103, mode: 'whole', verifyModel: 'j', pr: '352', draw: 1, exit: 1, error: 'killed' }),
     ];
     const corpus = (real, falsy) => ({ real, false: falsy, unfalsifiable: 0, published: real + falsy });
-    const scores = { batches: { 103: { alpha: { 1: { corpus: { 344: corpus(2, 0), 348: corpus(1, 1), 352: corpus(5, 0) } } } } }, judges: {} };
+    const scores = { batches: { 103: { 'alpha@j': { 1: { corpus: { 344: corpus(2, 0), 348: corpus(1, 1), 352: corpus(5, 0) } } } } }, judges: {} };
     expect(rowOf(summarize({ lines, catalog, scores, cacheRuleApplies: false }), 'alpha').corpus).toEqual({
       real: 3,
       false: 1,
@@ -313,13 +314,12 @@ describe('summarize: broken calls', () => {
 });
 
 describe('summarize: one row is one pair', () => {
-  const pairRun = (batch, judge, draw, over = {}) =>
-    run({ batch, mode: batch === 106 ? 'whole' : 'verify', verifyModel: judge, draw, key: `${batch}|${batch === 106 ? 'whole' : 'verify'}|alpha|418|${draw}|${judge}`, ...over });
+  const pairRun = (batch, mode, judge, draw, over = {}) => run({ batch, mode, verifyModel: judge, draw, key: `${batch}|${mode}|alpha|418|${draw}|${judge}`, ...over });
   const draws = (defects) => ({ 1: score(defects), 2: score(defects), 3: score(defects) });
   const lines = [
     ...[1, 2, 3].map((draw) => run({ draw, key: `2|find|alpha|418|${draw}` })),
-    ...[1, 2, 3].map((draw) => pairRun(7, 'gpt-5.5', draw)),
-    ...[1, 2, 3].map((draw) => pairRun(106, 'judge-x', draw)),
+    ...[1, 2, 3].map((draw) => pairRun(7, 'verify', 'gpt-5.5', draw)),
+    ...[1, 2, 3].map((draw) => pairRun(106, 'whole', 'judge-x', draw)),
   ];
   const scores = {
     batches: { 2: { alpha: draws(['D1', 'D2', 'D3']) }, 7: { alpha: draws(['D1', 'D2']) }, 106: { 'alpha@judge-x': draws(['D1', 'D2', 'D3', 'D4', 'D5']) } },
@@ -393,8 +393,8 @@ describe('summarize: one row is one pair', () => {
   it('pays each row for the find and its own judge only', () => {
     const paid = [
       run({}),
-      pairRun(7, 'j1', 1),
-      pairRun(7, 'j2', 1),
+      pairRun(7, 'verify', 'j1', 1),
+      pairRun(7, 'verify', 'j2', 1),
       call({ usage: { cost: 0.5 } }),
       call({ stage: 'verify', key: '7|verify|alpha|418|1|j1', requestedModel: 'j1', usage: { cost: 0.25 } }),
       call({ stage: 'verify', key: '7|verify|alpha|418|1|j2', requestedModel: 'j2', usage: { cost: 0.125 } }),
@@ -407,8 +407,8 @@ describe('summarize: one row is one pair', () => {
     const edited = { ...catalog, prices: { ...catalog.prices, j1: { input: 1, output: 1 }, j2: { input: 2, output: 2 } } };
     const priced = [
       run({}),
-      pairRun(7, 'j1', 1),
-      pairRun(104, 'j2', 1),
+      pairRun(7, 'verify', 'j1', 1),
+      pairRun(104, 'verify', 'j2', 1),
       call({}),
       call({ stage: 'verify', key: '7|verify|alpha|418|1|j1', requestedModel: 'j1', usage: { prompt_tokens: 1000, completion_tokens: 0 } }),
       call({ stage: 'verify', key: '104|verify|alpha|418|1|j2', requestedModel: 'j2', usage: { prompt_tokens: 1000, completion_tokens: 0 } }),
@@ -425,6 +425,33 @@ describe('summarize: one row is one pair', () => {
     expect(row.productionUsd).toBe(null);
   });
 
+  describe('a call that ran with no usage', () => {
+    const find = [run({}), call({})];
+    const verifyRun = run({ batch: 7, mode: 'verify', verifyModel: 'gpt-5.5', key: '7|verify|alpha|418|1|gpt-5.5' });
+    const verifyCall = call({ stage: 'verify', key: '7|verify|alpha|418|1|gpt-5.5', requestedModel: 'gpt-5.5', usage: null });
+    const rowFrom = (lines) => summarize({ lines, catalog, scores: noScores, cacheRuleApplies: false })[0];
+
+    it('makes the price unknown when the find was measured and the verify was not', () => {
+      const row = rowFrom([...find, verifyRun, verifyCall]);
+      expect([row.productionUsd, row.judgeUsd, row.costUnknown]).toEqual([null, null, true]);
+    });
+
+    it('makes the price unknown when the find was not measured', () => {
+      const row = rowFrom([run({}), call({ usage: null })]);
+      expect([row.productionUsd, row.costUnknown]).toEqual([null, true]);
+    });
+
+    it('leaves a stage with no calls at 0', () => {
+      const row = rowFrom([...find, verifyRun]);
+      expect([row.productionUsd, row.judgeUsd, row.costUnknown]).toEqual([(1000 * 1 + 100 * 2) / 1e6, 0, false]);
+    });
+
+    it('is not unknown for a row with no clean first run', () => {
+      const row = rowFrom([call({ usage: null })]);
+      expect([row.productionUsd, row.costUnknown]).toEqual([null, false]);
+    });
+  });
+
   it('makes no row of the expected failure of batch 0', () => {
     const probe = run({ label: 'base', batch: 0, mode: 'verify', verifyModel: 'gpt-5.5', key: '0|verify|base|688|1|gpt-5.5', pr: '688', exit: 5, error: 'HTTP 400', expectFailure: true });
     const find = run({ label: 'base', batch: 0, key: '0|find|base|895|1', pr: '895' });
@@ -434,11 +461,11 @@ describe('summarize: one row is one pair', () => {
 });
 
 describe('summarize: a pair with no corpus run of its own', () => {
-  const judged = (batch, judge, pr = '418') => run({ batch, mode: batch === 104 ? 'verify' : 'whole', verifyModel: judge, pr, key: `${batch}|whole|alpha|${pr}|1|${judge}` });
+  const judged = (batch, mode, judge, pr = '418') => run({ batch, mode, verifyModel: judge, pr, key: `${batch}|${mode}|alpha|${pr}|1|${judge}` });
   const counts = { real: 2, false: 0, unfalsifiable: 0, published: 2 };
   const ownCorpus = { real: 4, false: 0, unfalsifiable: 0, published: 4, prs: 2 };
-  const lines = [judged(104, 'j2'), judged(103, 'j1', '344'), judged(103, 'j1', '348'), judged(104, 'j3')];
-  const scores = { batches: { 103: { alpha: { 1: { corpus: { 344: counts, 348: counts } } } } }, judges: { j1: 15, j2: 14 } };
+  const lines = [judged(104, 'verify', 'j2'), judged(103, 'whole', 'j1', '344'), judged(103, 'whole', 'j1', '348'), judged(104, 'verify', 'j3')];
+  const scores = { batches: { 103: { 'alpha@j1': { 1: { corpus: { 344: counts, 348: counts } } } } }, judges: { j1: 15, j2: 14 } };
   const rows = summarize({ lines, catalog, scores, cacheRuleApplies: false });
 
   it('keeps the own counts of the pair that ran the corpus', () => {
@@ -462,8 +489,17 @@ describe('summarize: a pair with no corpus run of its own', () => {
   });
 
   it('inherits nothing when no pair of the finder ran the corpus', () => {
-    const [row] = summarize({ lines: [judged(104, 'j2')], catalog, scores: noScores, cacheRuleApplies: false });
+    const [row] = summarize({ lines: [judged(104, 'verify', 'j2')], catalog, scores: noScores, cacheRuleApplies: false });
     expect([row.corpus.prs, row.corpusFrom]).toEqual([0, null]);
+  });
+
+  it('gives each judge that ran the corpus its own counts, not those of the other', () => {
+    const clean = { real: 1, false: 0, unfalsifiable: 0, published: 1 };
+    const dirty = { real: 1, false: 1, unfalsifiable: 0, published: 2 };
+    const twoRuns = [judged(103, 'whole', 'j1', '344'), judged(103, 'whole', 'j2', '344')];
+    const both = { batches: { 103: { 'alpha@j1': { 1: { corpus: { 344: clean } } }, 'alpha@j2': { 1: { corpus: { 344: dirty } } } } }, judges: {} };
+    const rows2 = summarize({ lines: twoRuns, catalog, scores: both, cacheRuleApplies: false });
+    expect(rows2.map((r) => [r.judge, r.corpus.false, r.corpusFrom])).toEqual([['j1', 0, null], ['j2', 1, null]]);
   });
 
   it('keeps the generic-prompts row apart from the corpus of the baseline', () => {
@@ -489,7 +525,7 @@ describe('summarize: one judge across routes', () => {
     batches: {
       7: { alpha: { 1: score(['D1', 'D2'], { pr: '418' }) } },
       101: { alpha: { 1: score(['D1'], { pr: '930' }) } },
-      103: { alpha: { 1: { corpus: { 344: counts } } } },
+      103: { 'alpha@gpt-5.5': { 1: { corpus: { 344: counts } } } },
     },
     judges: { 'gpt-5.5': 15, 'openai/gpt-5.5': 3 },
   };
@@ -508,8 +544,8 @@ describe('summarize: one judge across routes', () => {
     expect(rows[0].judgeConsensus).toBe(15);
   });
 
-  it('adds up what the judge cost through both routes, and its verdicts', () => {
-    expect([rows[0].paidUsd, rows[0].refutedMean]).toEqual([0.375, 0.5]);
+  it('adds up what the judge cost through both routes', () => {
+    expect(rows[0].paidUsd).toBe(0.375);
   });
 
   it('goes by the served model on a verify call with no requestedModel', () => {
@@ -543,6 +579,24 @@ describe('summarize: is the pair runnable through one provider', () => {
 
   it('is not for a finder with no judge', () => {
     expect(runnableOf([run({})])).toBe(false);
+  });
+});
+
+describe('summarize: refuted counts the evidence on #418 only', () => {
+  const refuted = { verdict: 'refuted' };
+  const confirmed = { verdict: 'confirmed' };
+  const verifyOn418 = (draw) => run({ batch: 7, mode: 'verify', verifyModel: 'gpt-5.5', draw, key: `7|verify|alpha|418|${draw}|gpt-5.5`, results: [refuted, refuted, confirmed] });
+  const wholeOn930 = (draw) => run({ batch: 101, mode: 'whole', verifyModel: 'gpt-5.5', pr: '930', draw, key: `101|whole|alpha|930|${draw}|gpt-5.5`, results: [confirmed] });
+  const lines = [1, 2, 3].flatMap((draw) => [verifyOn418(draw), wholeOn930(draw)]);
+  const rows = summarize({ lines, catalog, scores: noScores, cacheRuleApplies: false });
+
+  it('gives 2 for three #418 runs with two refuted and three #930 runs with none', () => {
+    expect(rows[0].refutedMean).toBe(2);
+  });
+
+  it('takes the pair out of the pool', () => {
+    const baseline = { label: 'base', route: 'openai', judge: 'gpt-5.5', judgeUsd: null };
+    expect(pickProfiles(rows, baseline).best.openrouter.note).toBe('every row on this route left the pool');
   });
 });
 
