@@ -138,6 +138,16 @@ describe('judges', () => {
     expect(Object.values(key).map((k) => k.label)).toEqual(['model-alpha@gpt-5.5']);
   });
 
+  it('keeps the corpus items of two judges of one finder apart in batch 103', () => {
+    const whole = (judge, runId) => ({ ...verifyRun(judge, runId, 103), mode: 'whole', pr: '344' });
+    const { items, key } = anonymize({ runs: [whole('judge-x', 'r1'), whole('openai/judge-y', 'r2')], read, shuffle: (list) => list });
+    const counts = (real) => ({ real, false: 0, unfalsifiable: 0, published: real });
+    expect(applyKey({ [items[0].id]: counts(1), [items[1].id]: counts(2) }, key)).toEqual({
+      'model-alpha@judge-x': { 1: { corpus: { 344: counts(1) } } },
+      'model-alpha@judge-y': { 1: { corpus: { 344: counts(2) } } },
+    });
+  });
+
   it('keeps the plain label for a verify outside batch 104', () => {
     const { key } = anonymize({ runs: [verifyRun('judge-x', 'r1', 7), verifyRun('judge-x', 'r2', 7)], read });
     expect(Object.values(key).map((k) => k.label)).toEqual(['model-alpha', 'model-alpha']);

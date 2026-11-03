@@ -310,6 +310,25 @@ describe('the report', () => {
   });
 });
 
+describe('the report on a call with no usage', () => {
+  it('prints the production price as unknown when the verify reported none', () => {
+    const s = setup();
+    const line = (over) => ({ runId: 'r', batch: 1, label: 'gpt-5.6-sol', provider: 'openai', pr: '418', draw: 1, attempt: 1, expectFailure: false, ...over });
+    const find = '1|find|gpt-5.6-sol|418|1';
+    const verify = '1|verify|gpt-5.6-sol|418|1|gpt-5.5';
+    const records = [
+      line({ type: 'call', key: find, stage: 'find', requestedModel: 'gpt-5.6-sol', finishReason: 'stop', contentLength: 400, usage: { prompt_tokens: 10000, completion_tokens: 1000 } }),
+      line({ type: 'run', key: find, mode: 'find', findModel: 'gpt-5.6-sol', verifyModel: null, results: [], exit: 0, error: null }),
+      line({ type: 'call', key: verify, stage: 'verify', requestedModel: 'gpt-5.5', finishReason: 'stop', contentLength: 400, usage: null }),
+      line({ type: 'run', key: verify, mode: 'verify', findModel: 'gpt-5.6-sol', verifyModel: 'gpt-5.5', results: [], exit: 0, error: null }),
+    ];
+    const recordsDir = join(s.out, 'docs', 'eval', '2026-11', 'records');
+    mkdirSync(recordsDir, { recursive: true });
+    writeFileSync(join(recordsDir, 'batch-1.jsonl'), records.map((record) => `${JSON.stringify(record)}\n`).join(''));
+    expect(s.report().stdout.split('\n')).toContain('| gpt-5.6-sol | openai | gpt-5.6-sol + gpt-5.5 | 0 |  | - | 0 | - | - | - | - | - | 0 | - | $0.06 | unknown |  |');
+  });
+});
+
 describe('anonymize.mjs', () => {
   const clean = { defects: ['D1'], findings: 1 };
 
@@ -467,8 +486,9 @@ describe('the owner sequence, batch 0 to the report', () => {
     expect(refused.code).toBe(2);
     expect(s.batch(101, 16, ...selection, 'qwen3.8-flash', '--verify-model', 'openai/gpt-5.5', '--verify-route', 'openrouter').code).toBe(0);
     expect(s.batch(101, 16, ...selection, 'gpt-6.1-sol', ...toOpenai).code).toBe(0);
+    expect(s.batch(101, 16, ...selection, 'claude-sonnet-5-5', '--verify-model', 'claude-haiku-5-5', '--verify-route', 'anthropic').code).toBe(0);
     expect(runLines(101).filter((line) => line.label === 'qwen3.8-flash' && line.draw === 1).map((line) => line.only)).toEqual([{ find: ['other'], verify: ['openai'] }]);
-    grade(101, byLabel({ 'gpt-5.6-sol': defects('D1'), 'qwen3.8-flash': defects('D1'), 'gpt-6.1-sol': defects('D1', 'D2') }));
+    grade(101, byLabel({ 'gpt-5.6-sol': defects('D1'), 'qwen3.8-flash': defects('D1'), 'gpt-6.1-sol': defects('D1', 'D2'), 'claude-sonnet-5-5': defects('D1') }));
   }, STEP_MS);
 
   it('batches 102 and 103: the corpus', () => {
@@ -476,7 +496,7 @@ describe('the owner sequence, batch 0 to the report', () => {
     grade(102, () => counts(1));
     expect(s.batch(103, 16, ...selection, 'gpt-6.1-sol', ...toOpenai).code).toBe(0);
     expect(s.batch(103, 16, ...selection, 'claude-sonnet-5-5', '--verify-model', 'claude-sonnet-5-5', '--verify-route', 'anthropic').code).toBe(0);
-    grade(103, byLabel({ 'gpt-6.1-sol': counts(2), 'claude-sonnet-5-5': counts(1) }));
+    grade(103, byLabel({ 'gpt-6.1-sol@gpt-5.5': counts(2), 'claude-sonnet-5-5@claude-sonnet-5-5': counts(1) }));
   }, STEP_MS);
 
   it('batch 104: the judges on the same inputs', () => {
@@ -528,12 +548,12 @@ describe('the owner sequence, batch 0 to the report', () => {
     }, STEP_MS);
 
     it('prints the rows of one finder with each of its judges', () => {
-      expect(lines).toContain('| claude-sonnet-5-5 | anthropic | claude-sonnet-5-5 + gpt-5.5 | 3 | 2/3/3 | 3 | 3 | D4, D5 | 2 | D1, D2 | D3, D4, D5 | - | 0 | 0% | $0.46 | $0.05 |  |');
-      expect(lines).toContain('| claude-sonnet-5-5 | anthropic | claude-sonnet-5-5 + claude-haiku-5-5 | 3 | 2/3/3 | 3 | 3 | D4, D5 | 5 | D1, D2, D3, D4, D5 | none | - | 0 | 0% | $0.39 | $0.03 |  |');
+      expect(lines).toContain('| claude-sonnet-5-5 | anthropic | claude-sonnet-5-5 + gpt-5.5 | 3 | 2/3/3 | 3 | 3 | D4, D5 | 2 | D1, D2 | D3, D4, D5 | - | 0 | 0% | $0.55 | $0.05 |  |');
+      expect(lines).toContain('| claude-sonnet-5-5 | anthropic | claude-sonnet-5-5 + claude-haiku-5-5 | 3 | 2/3/3 | 3 | 3 | D4, D5 | 5 | D1, D2, D3, D4, D5 | none | 1 | 0 | 0% | $0.48 | $0.03 |  |');
     });
 
     it('keeps the two routes of the gpt-5.5 judge on one row, with the published median and #930', () => {
-      expect(lines).toContain('| qwen3.8-flash | openrouter | qwen/qwen3.8-flash + gpt-5.5 | 3 | 3/3/3 | 3 | 3 | D4, D5 | 2 | D1, D2 | D3, D4, D5 | 1 | 0.5 | 0% | $0.17 | $0.03 |  |');
+      expect(lines).toContain('| qwen3.8-flash | openrouter | qwen/qwen3.8-flash + gpt-5.5 | 3 | 3/3/3 | 3 | 3 | D4, D5 | 2 | D1, D2 | D3, D4, D5 | 1 | 1 | 0% | $0.17 | $0.03 |  |');
     });
 
     it('calls a pair runnable only when its judge went through the route of the finder', () => {
@@ -557,8 +577,8 @@ describe('the owner sequence, batch 0 to the report', () => {
         'gpt-6.1-sol + claude-sonnet-5-5',
         'gpt-6.1-sol + gpt-6.1-sol',
         'claude-sonnet-5-5 + gpt-5.5',
-        'claude-sonnet-5-5 + claude-sonnet-5-5',
         'claude-sonnet-5-5 + claude-haiku-5-5',
+        'claude-sonnet-5-5 + claude-sonnet-5-5',
         'claude-opus-5-5 + gpt-5.5',
         'gpt-6-astra + gpt-5.5',
         'gpt-5.6-sol + gpt-5.5',
@@ -594,6 +614,7 @@ describe('the owner sequence, batch 0 to the report', () => {
         corpus: { real: 3, false: 0, unfalsifiable: 0, published: 3, prs: 3 },
         corpusFrom: null,
         runnable: true,
+        costUnknown: false,
         judgeConsensus: 15,
         brokenCalls: 0,
         medianRecall930: 1,
@@ -621,14 +642,14 @@ describe('the owner sequence, batch 0 to the report', () => {
       expect([ran.corpus, ran.corpusFrom, heir.corpus, heir.corpusFrom]).toEqual([own, null, own, 'gpt-5.5']);
     });
 
-    it('admits sonnet + haiku at 5/5 on the corpus sonnet ran under another judge, with the consensus of haiku', () => {
+    it('passes sonnet + haiku at 5/5 through the admission on the corpus sonnet ran under another judge, with the consensus of haiku', () => {
       const r = pairOf('claude-sonnet-5-5 + claude-haiku-5-5');
       expect([r.medianPublished, r.judgeConsensus, r.corpusFrom, r.composite]).toEqual([5, 15, 'claude-sonnet-5-5', false]);
       expect(lines).toContain('- claude-sonnet-5-5 + claude-haiku-5-5: admitted');
     });
 
-    it('leads anthropic with a note on the inherited corpus, preliminary only for #930', () => {
-      expect(lines).toContain("| best of the best | claude-sonnet-5-5 + claude-haiku-5-5 (preliminary) - no #930 yet; corpus counts from the finder's run with claude-sonnet-5-5 |");
+    it('leads anthropic as preliminary with #930 in hand, for the inherited corpus alone', () => {
+      expect(lines).toContain("| best of the best | claude-sonnet-5-5 + claude-haiku-5-5 (preliminary) - corpus counts from the finder's run with claude-sonnet-5-5 |");
     });
 
     it('leaves the expensive tier and the refuted out of the profiles', () => {
@@ -643,6 +664,19 @@ describe('the owner sequence, batch 0 to the report', () => {
     it('prints the manual spend', () => {
       expect(lines).toContain('- manual: $0.50');
     });
+
+    it('clears sonnet + haiku once that pair ran the corpus itself', () => {
+      expect(s.batch(103, 30, ...selection, 'claude-sonnet-5-5', '--verify-model', 'claude-haiku-5-5', '--verify-route', 'anthropic').code).toBe(0);
+      const items = join(s.dir, 'items-103-again.json');
+      const key = join(s.dir, 'key-103-again.json');
+      expect(s.anonymize('--batch', '103', '--out', items, '--key', key).code).toBe(0);
+      const table = { 'gpt-6.1-sol@gpt-5.5': counts(2), 'claude-sonnet-5-5@claude-sonnet-5-5': counts(1), 'claude-sonnet-5-5@claude-haiku-5-5': counts(1) };
+      const entries = JSON.parse(readFileSync(key, 'utf8'));
+      const graded = join(s.dir, 'graded-103-again.json');
+      writeFileSync(graded, JSON.stringify(Object.fromEntries(JSON.parse(readFileSync(items, 'utf8')).map((item) => [item.id, table[entries[item.id].label]]))));
+      expect(s.anonymize('--apply', graded, '--batch', '103', '--key', key, '--force').code).toBe(0);
+      expect(s.report().stdout.split('\n')).toContain('| best of the best | claude-sonnet-5-5 + claude-haiku-5-5 |');
+    }, STEP_MS);
   });
 });
 

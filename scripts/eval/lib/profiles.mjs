@@ -40,9 +40,12 @@ function cellOf(row, pool, extra = '') {
   // Nobody can configure such a pair in production, but it stays in the pool: selection needs these leaders.
   const unconfigurable = row.judge !== null && !row.runnable;
   if (unconfigurable) notes.push('not runnable through one provider');
+  if (row.costUnknown) notes.push('production cost unknown: a call reported no usage');
   if (pool === 'unadmitted') notes.push('nobody on the route passed the admission');
   if (extra !== '') notes.push(extra);
-  return { row, preliminary: !verdict.ok || row.medianRecall930 === null || row.medianPublished === null || unconfigurable, note: notes.join('; ') };
+  // Another judge's clean corpus does not prove this judge publishes no false finding, so inherited counts admit but do not settle.
+  const inherited = row.corpusFrom !== null;
+  return { row, preliminary: !verdict.ok || row.medianRecall930 === null || row.medianPublished === null || unconfigurable || inherited || row.costUnknown, note: notes.join('; ') };
 }
 
 const empty = { row: null, preliminary: false, note: 'no row on this route' };
@@ -61,12 +64,13 @@ export function pickProfiles(rows, baseline) {
   const estimate = baseline.judgeUsd ?? null;
   const cost = (row) => (row.productionUsd ?? Infinity) + (row.judgeUsd === null ? estimate ?? 0 : 0);
   const judgeNote = (row) => {
-    if (row.judgeUsd !== null) return '';
+    if (row.judgeUsd !== null || row.costUnknown) return '';
     return estimate === null ? 'no judge cost in the price yet' : `judge cost estimated at ${usd(estimate)} from the baseline`;
   };
   const isBaseline = (row) => row.label === baseline.label && row.judge === baseline.judge;
   const notes = (...parts) => parts.filter((part) => part !== '').join('; ');
-  const byMeritThen930ThenCost = (a, b) => merit(b) - merit(a) || on930(b) - on930(a) || cost(a) - cost(b);
+  const pricedFirst = (a, b) => Number(a.costUnknown) - Number(b.costUnknown);
+  const byMeritThen930ThenCost = (a, b) => pricedFirst(a, b) || merit(b) - merit(a) || on930(b) - on930(a) || cost(a) - cost(b);
 
   for (const route of ROUTES) {
     const onRoute = rows.filter((r) => r.route === route && !r.generic);
