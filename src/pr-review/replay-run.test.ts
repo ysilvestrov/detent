@@ -203,3 +203,51 @@ describe('replay context budget', () => {
     expect(bodies).toEqual([]);
   });
 });
+
+describe('replay executor pinning', () => {
+  const bodyOf = (raw: string): Record<string, any> => JSON.parse(raw) as Record<string, any>;
+
+  it('pins each stage to its own executor', async () => {
+    const path = recordPath();
+    const { fetchFn, bodies } = makeFetch();
+    const env = {
+      OPENROUTER_API_KEY: KEY,
+      AI_REVIEW_MODEL: 'f/model',
+      AI_REVIEW_VERIFY_MODEL: 'v/model',
+      AI_REVIEW_OPENROUTER_ONLY: 'moonshotai',
+      AI_REVIEW_VERIFY_OPENROUTER_ONLY: 'openai, azure',
+      AI_REVIEW_CACHE: 'off',
+    };
+    const { code } = await replay({ record: path }, { fetchFn, env });
+
+    expect(code).toBe(0);
+    expect(bodyOf(bodies[0]!).provider).toEqual({ only: ['moonshotai'], allow_fallbacks: false, require_parameters: true });
+    expect(bodyOf(bodies[1]!).provider).toEqual({ only: ['openai', 'azure'], allow_fallbacks: false, require_parameters: true });
+    expect(readRecord(path).at(-1)).toMatchObject({ only: { find: ['moonshotai'], verify: ['openai', 'azure'] }, cacheMode: 'off' });
+  });
+
+  it('refuses a pin outside openrouter with code 2 and no model call', async () => {
+    const { fetchFn, bodies } = makeFetch();
+    const { code, err } = await replay({}, { fetchFn, env: { OPENAI_API_KEY: KEY, AI_REVIEW_OPENROUTER_ONLY: 'x' } });
+
+    expect(code).toBe(2);
+    expect(err.join('\n')).toContain('AI_REVIEW_OPENROUTER_ONLY');
+    expect(bodies).toEqual([]);
+  });
+
+  it('refuses a verify pin outside openrouter and names its variable', async () => {
+    const { fetchFn, bodies } = makeFetch();
+    const { code, err } = await replay({}, { fetchFn, env: { OPENAI_API_KEY: KEY, AI_REVIEW_VERIFY_OPENROUTER_ONLY: 'x' } });
+
+    expect(code).toBe(2);
+    expect(err.join('\n')).toContain('AI_REVIEW_VERIFY_OPENROUTER_ONLY');
+    expect(bodies).toEqual([]);
+  });
+
+  it('leaves the body alone without these variables', async () => {
+    const { fetchFn, bodies } = makeFetch();
+    await replay({}, { fetchFn });
+
+    expect(Object.keys(bodyOf(bodies[0]!))).toEqual(['model', 'max_completion_tokens', 'response_format', 'messages']);
+  });
+});

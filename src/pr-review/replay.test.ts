@@ -1,5 +1,41 @@
 import { describe, expect, it } from 'vitest';
-import { ensureHeadCommit, formatContextBudget, resolveReplayArgs, resolveReplayBase } from './replay.js';
+import { PROVIDERS } from './providers.js';
+import { ensureHeadCommit, formatContextBudget, resolveReplayArgs, resolveReplayBase, stageExtraBody } from './replay.js';
+
+describe('stageExtraBody', () => {
+  it('pins OpenRouter to the named executors and forbids fallbacks', () => {
+    expect(stageExtraBody({ provider: PROVIDERS.openrouter, model: 'm', only: 'openai,azure', cacheOff: false, cacheOffModels: undefined })).toEqual({
+      provider: { only: ['openai', 'azure'], allow_fallbacks: false, require_parameters: true },
+    });
+  });
+
+  it('treats a blank pin as no pin', () => {
+    expect(stageExtraBody({ provider: PROVIDERS.openrouter, model: 'm', only: ' ', cacheOff: false, cacheOffModels: undefined })).toEqual({
+      provider: { require_parameters: true },
+    });
+  });
+
+  it('turns cache writes off for a model on the list', () => {
+    expect(
+      stageExtraBody({ provider: PROVIDERS.openai, model: 'gpt-5.6-sol', only: undefined, cacheOff: true, cacheOffModels: 'gpt-5.6-sol, gpt-6.1-sol' }),
+    ).toEqual({ prompt_cache_options: { mode: 'explicit' } });
+  });
+
+  it('combines the pin and the cache switch', () => {
+    expect(stageExtraBody({ provider: PROVIDERS.openrouter, model: 'gpt-5.6-sol', only: 'azure', cacheOff: true, cacheOffModels: 'gpt-5.6-sol' })).toEqual({
+      provider: { only: ['azure'], allow_fallbacks: false, require_parameters: true },
+      prompt_cache_options: { mode: 'explicit' },
+    });
+  });
+
+  it('leaves a model that is not on the list alone', () => {
+    expect(stageExtraBody({ provider: PROVIDERS.openai, model: 'gpt-5.5', only: undefined, cacheOff: true, cacheOffModels: 'gpt-5.6-sol' })).toBeUndefined();
+  });
+
+  it('turns nothing off when the list is not set', () => {
+    expect(stageExtraBody({ provider: PROVIDERS.openai, model: 'gpt-5.6-sol', only: undefined, cacheOff: true, cacheOffModels: undefined })).toBeUndefined();
+  });
+});
 
 describe('resolveReplayArgs', () => {
   it('reads a bare PR number', () => {
