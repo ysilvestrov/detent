@@ -125,12 +125,17 @@ describe('suspects', () => {
 });
 
 describe('judges', () => {
-  const verifyRun = (judge, runId) =>
-    run({ runId, mode: 'verify', findingsFile: null, verifyModel: judge, results: [{ file: 'b.ts', line: 7, severity: 'P2', confidence: 'low', quote: 'z', claim: 'c', whyItBreaks: 'w', verdict: 'confirmed', evidence: 'e' }] });
+  const verifyRun = (judge, runId, batch = 104) =>
+    run({ runId, batch, mode: 'verify', findingsFile: null, verifyModel: judge, results: [{ file: 'b.ts', line: 7, severity: 'P2', confidence: 'low', quote: 'z', claim: 'c', whyItBreaks: 'w', verdict: 'confirmed', evidence: 'e' }] });
 
   it('keys each judge of one find apart', () => {
     const { key } = anonymize({ runs: [verifyRun('judge-x', 'r1'), verifyRun('judge-y', 'r2')], read });
     expect(Object.values(key).map((k) => k.label)).toEqual(['model-alpha@judge-x', 'model-alpha@judge-y']);
+  });
+
+  it('keeps the plain label for a verify outside batch 104', () => {
+    const { key } = anonymize({ runs: [verifyRun('judge-x', 'r1', 7), verifyRun('judge-x', 'r2', 1)], read });
+    expect(Object.values(key).map((k) => k.label)).toEqual(['model-alpha', 'model-alpha']);
   });
 
   it('keeps the plain label for a find', () => {
