@@ -28,12 +28,13 @@ function cellOf(row, pool, extra = '') {
   const verdict = admitted(row);
   const notes = [];
   if (!verdict.ok) notes.push(`not admitted: ${verdict.reasons.join('; ')}`);
+  if (row.medianPublished === null) notes.push('ranked on find-stage scores, no published median');
   if (row.medianRecall930 === null) notes.push('no #930 yet');
   if (row.unstable) notes.push('unstable: the owner decides');
   if (row.composite) notes.push('composite pair');
   if (pool === 'unadmitted') notes.push('nobody on the route passed the admission');
   if (extra !== '') notes.push(extra);
-  return { row, preliminary: !verdict.ok || row.medianRecall930 === null, note: notes.join('; ') };
+  return { row, preliminary: !verdict.ok || row.medianRecall930 === null || row.medianPublished === null, note: notes.join('; ') };
 }
 
 const empty = { row: null, preliminary: false, note: 'no row on this route' };
@@ -47,7 +48,7 @@ export function pickProfiles(rows, baseline) {
   const balanced = {};
   const value = {};
   for (const route of ROUTES) {
-    const onRoute = rows.filter((r) => r.route === route);
+    const onRoute = rows.filter((r) => r.route === route && !r.generic);
     if (onRoute.length === 0) {
       best[route] = balanced[route] = value[route] = empty;
       continue;

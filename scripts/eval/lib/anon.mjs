@@ -69,18 +69,32 @@ export function anonymize({ runs, read, shuffle = shuffleInPlace }) {
   return { items: shuffle(entries.map((e) => e.item)), key, suspects };
 }
 
-/** Anonymous scores to `{label: {draw: scores}}`; an id missing from the key is a mix-up and throws. */
+/** Batches whose items of any PR but #418 are corpus items: one run per PR, all at draw 1. */
+const CORPUS_BATCHES = [102, 103, 105];
+const MAIN_PR = '418';
+
+/**
+ * Anonymous scores to `{label: {draw: scores}}`; an id missing from the key is a mix-up and throws.
+ * A corpus item goes to `scores[label][1].corpus[pr]`, so the several PRs of one label do not meet in one slot.
+ */
 export function applyKey(anonScores, key) {
   const scores = {};
   const taken = {};
   for (const [id, value] of Object.entries(anonScores)) {
     const entry = key[id];
     if (entry === undefined) throw new Error(`anonymize: id ${id} is not in the key`);
-    const slot = `${entry.label}|${entry.draw}`;
+    const isCorpus = CORPUS_BATCHES.includes(entry.batch) && entry.pr !== MAIN_PR;
+    const slot = isCorpus ? `${entry.label}|corpus|${entry.pr}` : `${entry.label}|${entry.draw}`;
     if (taken[slot] !== undefined) throw new Error(`anonymize: ids ${taken[slot]} and ${id} are both label ${entry.label}, draw ${entry.draw}`);
     taken[slot] = id;
     scores[entry.label] ??= {};
-    scores[entry.label][entry.draw] = value;
+    if (isCorpus) {
+      scores[entry.label][1] ??= {};
+      scores[entry.label][1].corpus ??= {};
+      scores[entry.label][1].corpus[entry.pr] = value;
+    } else {
+      scores[entry.label][entry.draw] = { ...scores[entry.label][entry.draw], ...value };
+    }
   }
   return scores;
 }

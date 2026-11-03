@@ -128,3 +128,16 @@ describe('preliminary cells and empty routes', () => {
     expect(pickProfiles([low], baseline).value.openrouter).toEqual({ row: null, preliminary: false, note: 'nobody reaches 3 on #418 and 1 on #930' });
   });
 });
+
+describe('rows ranked on find-stage scores', () => {
+  it('marks a leader without a published median preliminary and says why', () => {
+    const rows = [row({ label: 'found', route: 'openrouter', medianPublished: null, medianKnown: 4 })];
+    const cell = pickProfiles(rows, baseline).best.openrouter;
+    expect([cell.row.label, cell.preliminary, cell.note]).toEqual(['found', true, 'ranked on find-stage scores, no published median']);
+  });
+
+  it('never offers the generic-prompts row', () => {
+    const rows = [row({ label: 'base (generic prompts)', generic: true, medianPublished: 9 }), baseline];
+    expect(pickProfiles(rows, baseline).best.openai.row.label).toBe('base');
+  });
+});
