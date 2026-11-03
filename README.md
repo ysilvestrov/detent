@@ -41,8 +41,12 @@ The process grew out of a real project and rests on four ideas:
 - **A Claude Code plugin** over the same `skills/` directory, as a second way to get the skills
   into Claude Code.
 
-Release 2 is planned to add AI PR review in GitHub as a reusable Action. Design documents live in
-`docs/specs/` and `docs/plans/`.
+## Release 2 (v0.4.0)
+
+- **AI PR review in GitHub**: the `detent pr-review` command and a composite Action around it. See
+  [AI PR review in GitHub](#ai-pr-review-in-github).
+
+Design documents live in `docs/specs/` and `docs/plans/`.
 
 ## Install
 
@@ -264,6 +268,120 @@ more reason to run it in the background.
 the constitution's deletion rule: literal paths, a dry-run shown to the owner first, never an
 inline command, never in the background.
 
+## AI PR review in GitHub
+
+`detent pr-review` reviews a pull request on every push, in two stages: one model finds problems, a
+mechanical gate drops every finding whose quote is not in the code, and a second model verifies the
+rest. It complements `cross-review` and does not replace it: `cross-review` is one pass before the
+PR by a model of another family, while this is a configured pair of models that sees every push, the
+fixes after `cross-review` included. The rule of another family does not apply here.
+
+Data from one project, warsaw-beer-bot, where this review came from: on 23 of 51 PRs the author
+fixed findings of the CI review in code that had already been through `cross-review`, 58 findings in
+all, on five PRs after a verdict of 0 findings. It cost about $0.34 per PR with `cross-review`. Your
+numbers will differ.
+
+### Connecting it
+
+1. Add the key of one provider as a repository secret.
+2. Copy [`examples/pr-review.workflow.yml`](examples/pr-review.workflow.yml) to
+   `.github/workflows/` and replace `<SHA>` with the commit of the release tag. Pin the commit, not
+   the tag, because this action receives the key.
+
+The Action checks out the head of the PR, installs the package at the version in its own
+`package.json` into a separate folder with `--ignore-scripts`, and runs the command. The key is only
+in the environment of that last step. The code of the PR is not installed or run, and the model is
+called without tools: only text and a JSON schema.
+
+### Providers
+
+| `provider` | Address | Key | Default models |
+|---|---|---|---|
+| `openai` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `gpt-5.6-sol` to find, `gpt-5.5` to verify |
+| `anthropic` | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | none: set them in `prReview` |
+| `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | none: set them in `prReview` |
+
+The provider is `prReview.provider` if set. Otherwise exactly one key picks it; several keys are
+exit 2, asking you to set `provider`. For OpenRouter the request carries
+`provider: {require_parameters: true}`, otherwise a route may silently ignore the schema.
+
+### `prReview` in `detent.json`
+
+Every field is optional. An unknown key is exit 2: a typo would otherwise silently give the wrong
+scope.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `include` | `["**"]` | What to review. |
+| `ignore` | `["**/*.md", "docs/**", "package-lock.json"]` | What not to review. |
+| `bodyExclude` | `["**/*.test.*", "tests/**"]` | Whose full text stays out of the context. The diff still goes in, and findings are allowed. |
+| `bodyInclude` | `[]` | Exceptions to `bodyExclude`. |
+| `provider` | by the key that is set | `openai`, `anthropic` or `openrouter`. |
+| `findModel` | by provider | The model that finds. |
+| `verifyModel` | by provider | The model that verifies. |
+
+**Settings count only from the base branch.** The config and the prompts are read from
+`refs/remotes/origin/<base>`, so a PR cannot change how it is reviewed itself, and a PR that adds
+settings is reviewed under the old ones. When the settings or the prompts change, an open PR gets a
+full review on its next run.
+
+**Prompts.** A project overrides them with `.detent/prompts/pr-review-find.md` and
+`.detent/prompts/pr-review-verify.md`. `{{reviewContext}}` is the `reviewContext` from `detent.json`;
+an override may leave it out.
+
+### Exit codes
+
+| Exit | Meaning |
+|---|---|
+| 0 | the review is published, or skipped: no files in scope, or a PR from a fork |
+| 2 | a usage or config error, including a broken `detent.json` on the base branch |
+| 5 | the review did not finish; a comment about the failure goes on the PR and is updated, not repeated |
+
+Without a key, a PR from a fork exits 0 with a message, because forks get no secrets; any other PR
+exits 5. `provider` set without its own key counts as no key.
+
+### What is not reviewed
+
+- Files outside `include` or inside `ignore`: the review counts them separately.
+- PRs from forks, and PRs by Dependabot, which the example workflow leaves out.
+- The full text of files under `bodyExclude`, and of binary files: those go as a diff only.
+
+### The token
+
+The review state lives in a hidden comment of the review, and the command looks for it only in
+reviews by a bot account. `github.token` is one. A personal access token publishes as a person:
+the state is not found, so every push pays for a full review and adds another one. Pass a token of a
+GitHub App or leave `github-token` at its default.
+
+### `--replay`
+
+```
+detent pr-review --replay <n> [--head <sha>] [--base <sha>] [--provider <id>]
+```
+
+Reviews PR `<n>` locally and publishes nothing; it prints the findings and the spend. It takes the
+PR's data through `gh` and the files through `git show`, so a past head works too. Unlike a run in
+CI, it reads the config and the prompts from the working tree, so that settings can be measured
+before they are merged, and it honours `AI_REVIEW_MODEL`, `AI_REVIEW_VERIFY_MODEL` and `--provider`.
+Without a key it exits 2.
+
+### Importing the code
+
+`@ysilvestrov/detent/pr-review` exports the stages for measurement tools. It is **not a stable
+interface**: pin the exact version of the package if you import it.
+
+### Limits of the review
+
+- **Anthropic and OpenRouter are unmeasured.** The numbers above come from the default OpenAI pair.
+  A model outside the price table shows tokens without dollars. Anthropic ignores
+  `reasoning_effort`. The price on OpenRouter depends on the route.
+- **`.gitattributes`.** A PR that adds `* -diff` hides its diff from the reviewer, and the review
+  comes out clean. The change to `.gitattributes` is visible in the PR.
+- **Rare cases carried over on purpose**, listed in the spec
+  (`docs/specs/2026-11/2026-11-02-pr-review-design.md`): a retargeted PR keeps its stored state, one
+  oversized finding can make GitHub reject the review, the state is looked up only among the first
+  100 reviews of a PR, and a file that cannot be read closes its finding as gone.
+
 ## Windows
 
 - The CLI looks reviewers up in `PATH` × `PATHEXT` itself and spawns them without a shell. A
@@ -300,18 +418,22 @@ What release 1 has and has not proved, from the spec's claim → evidence table 
 
 ## Releasing (for the owner)
 
-1. Merge to `main`, then tag `v<version>` (the version in `package.json`) on the merged commit.
-2. Push the tag: `git push origin v<version>`.
-3. Make a clean checkout of the tag and run `npm ci`, then `npm run gate`, then `npm run smoke`.
+1. Before merging: compare `PRICES` and `PRICES_CHECKED_ON` in `src/pr-review/usage.ts` with the
+   providers' current prices, and run `node dist/cli.js pr-review --replay <n>` from a local build
+   for each of the three providers. A provider whose answer does not pass the schema is marked
+   unsupported in this README.
+2. Merge to `main`, then tag `v<version>` (the version in `package.json`) on the merged commit.
+3. Push the tag: `git push origin v<version>`.
+4. Make a clean checkout of the tag and run `npm ci`, then `npm run gate`, then `npm run smoke`.
    Do not publish if either fails.
-4. Run `npm login`, then `npm publish --dry-run` to see what would be published.
-5. Run `npm publish` and enter the 2FA code. `publishConfig.access` is already `public`, and
+5. Run `npm login`, then `npm publish --dry-run` to see what would be published.
+6. Run `npm publish` and enter the 2FA code. `publishConfig.access` is already `public`, and
    `prepack` builds `dist/`.
-6. Check the registry: `npm view @ysilvestrov/detent version dist.shasum`. The shasum must equal
+7. Check the registry: `npm view @ysilvestrov/detent version dist.shasum`. The shasum must equal
    the one `npm pack --dry-run` prints for the same checkout.
-7. Check the install on npm 11 and on npm 12, in an empty folder and in a folder that has the
+8. Check the install on npm 11 and on npm 12, in an empty folder and in a folder that has the
    dependency. Include `install` in a clean git repository without a `package.json`.
-8. Update the Claude plugin to the new version, as described in the Claude Code plugin section
+9. Update the Claude plugin to the new version, as described in the Claude Code plugin section
    above.
 
 ### Working on detent itself
@@ -327,6 +449,7 @@ folder of about 250 KB in the system temp, which you remove by hand. It prints t
 
 CI runs on every pull request and every push to `main`: `npm run gate` and `npm run smoke` on
 Ubuntu with Node 24 and on Windows with Node 26, and `npm run smoke` alone on Ubuntu with Node 20,
-the minimum in `engines`. CI does not publish and does not run the reviewers, so `cross-review` is
-checked only for its refusal. A red check does not block a merge until the owner makes it required
-in the branch settings.
+the minimum in `engines`. CI does not publish, does not run the reviewers and calls no model
+provider, so `cross-review` and `pr-review` are checked only for their refusals, and the Action is
+checked only as text: this repository does not run it on itself. A red check does not block a merge
+until the owner makes it required in the branch settings.

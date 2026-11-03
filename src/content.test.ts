@@ -144,6 +144,9 @@ describe('cross-review skill', () => {
   test('on exit 5 tells the human explicitly', () => {
     expect(skill.includes('**Tell the human explicitly in')).toBe(true);
   });
+  test('the review in CI does not replace it', () => {
+    expect(skill.includes('`detent pr-review` in CI does not replace this review')).toBe(true);
+  });
 });
 
 describe('dev-cycle skill', () => {
@@ -184,6 +187,9 @@ describe('constitution', () => {
     ['finishing takes baseBranch and runs cross-review', 'do not ask for the base branch: rebase on `baseBranch`, run the gate, run `cross-review`, then open the PR by default'],
   ])('rule 7: %s', (_name, phrase) => {
     expect(flat.includes(phrase)).toBe(true);
+  });
+  test('rule 6: the review in CI complements cross-review, the family rule is for cross-review only', () => {
+    expect(flat.includes('The review in CI (`detent pr-review`) complements `cross-review` and does not replace it; the rule of another family applies only to `cross-review`.')).toBe(true);
   });
   test('does not name the bounded branch', () => {
     expect(text.includes('bounded')).toBe(false);

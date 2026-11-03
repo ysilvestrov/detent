@@ -1,6 +1,6 @@
 {
   "name": "detent",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Process skills for AI coding agents: design specs with an owner section, PR slicing, cross-review by another model family, and an explicit dev cycle.",
   "author": { "name": "Yuriy Silvestrov" },
   "repository": "https://github.com/ysilvestrov/detent",
