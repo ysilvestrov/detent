@@ -372,9 +372,13 @@ interface**: pin the exact version of the package if you import it.
 
 ### Limits of the review
 
-- **Anthropic and OpenRouter are unmeasured.** The numbers above come from the default OpenAI pair.
-  A model outside the price table shows tokens without dollars. Anthropic ignores
+- **Anthropic and OpenRouter are unmeasured.** A live `--replay` on one PR passed the schema on each
+  of the three providers (2026-11-03), which proves the transport and nothing about the quality of
+  the review. The numbers above come from the default OpenAI pair. A model outside the price table,
+  and any `openai/…` name on OpenRouter, shows tokens without dollars. Anthropic ignores
   `reasoning_effort`. The price on OpenRouter depends on the route.
+- **Cache writes are not counted.** The vendor page prices them separately for the `gpt-5.6` models,
+  and the spend line has no such column: check it against the bill.
 - **`.gitattributes`.** A PR that adds `* -diff` hides its diff from the reviewer, and the review
   comes out clean. The change to `.gitattributes` is visible in the PR.
 - **Rare cases carried over on purpose**, listed in the spec
