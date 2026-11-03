@@ -1,10 +1,12 @@
 // The real scripts, spawned in temp dirs against a stub of `dist/cli.js` and a stub of `fetch`: no network, fake keys.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { parseRecords } from './lib/records.mjs';
+import { summarize } from './lib/summary.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FAKE_KEYS = 'OPENAI_API_KEY=fake-openai-key-0123456789\nANTHROPIC_API_KEY=fake-anthropic-key-0123456789\nOPENROUTER_API_KEY=fake-openrouter-key-0123456789\n';
@@ -17,6 +19,7 @@ const seedCatalog = () => ({
     candidate('claude-haiku-5-5', 'claude-haiku-5-5', 'anthropic', 'cheap', { input: 0.1, output: 0.5 }),
     candidate('qwen3.8-flash', 'qwen/qwen3.8-flash', 'openrouter', 'cheap', { input: 0.15, output: 0.47 }),
     candidate('grok-build-0.1', 'x-ai/grok-build-0.1', 'openrouter', 'cheap', { input: 1, output: 2 }),
+    candidate('gpt-6.1-terra', 'gpt-6.1-terra', 'openai', 'mid', { input: 1, output: 5 }),
     candidate('gpt-6.1-sol', 'gpt-6.1-sol', 'openai', 'mid', { input: 2, cacheWrite: 2.5, output: 10 }),
     candidate('claude-sonnet-5-5', 'claude-sonnet-5-5', 'anthropic', 'mid', { input: 2, output: 10 }),
     candidate('claude-opus-5-5', 'claude-opus-5-5', 'anthropic', 'expensive', { input: 4, output: 20 }),
@@ -94,6 +97,10 @@ function setup({ catalog = seedCatalog(), endpoints = seedEndpoints() } = {}) {
     writeCatalog: (value) => writeFileSync(catalogFile, JSON.stringify(value, null, 2)),
     records: (n) => readFileSync(join(out, 'docs', 'eval', '2026-11', 'records', `batch-${n}.jsonl`), 'utf8').trim().split('\n').map((line) => JSON.parse(line)),
     fetched: () => readFileSync(fetchLog, 'utf8').trim().split('\n'),
+    report: (...args) => spawn('summary.mjs', ['--batch-from', '0', ...args, ...roots]),
+    anonymize: (...args) => spawn('anonymize.mjs', [...args, '--out-root', out]),
+    keyFile: (n) => join(out, 'tmp', 'eval', `anon-key-batch-${n}.json`),
+    scoresFile: (n) => join(out, 'docs', 'eval', '2026-11', 'scores', `batch-${n}.json`),
     writeScores: (n, value) => {
       const scoresDir = join(out, 'docs', 'eval', '2026-11', 'scores');
       mkdirSync(scoresDir, { recursive: true });
@@ -224,6 +231,67 @@ describe('batch 6 leaves batch 7 standing', () => {
 
   it('runs when the run fits beside that reserve', () => {
     expect(afterBatch5().batch(6, 4.3, '--labels', 'gpt-6-astra').code).toBe(0);
+  });
+});
+
+describe('the report', () => {
+  const draws = (defects) => ({ 1: { defects, findings: 3, pr: '418' }, 2: { defects, findings: 3, pr: '418' }, 3: { defects, findings: 3, pr: '418' } });
+
+  function afterBatch1() {
+    const s = setup();
+    s.endpoints();
+    expect(s.batch(0, 11).code).toBe(0);
+    expect(s.preflight().code).toBe(0);
+    expect(s.batch(1, 11).code).toBe(0);
+    s.writeScores(1, { 'gpt-5.6-sol': draws(['D1', 'D2', 'D3']), 'gpt-5.6-sol@gpt-5.5': draws(['D1', 'D2']) });
+    return s;
+  }
+  let report;
+  let lines;
+  beforeAll(() => {
+    report = afterBatch1().report();
+    lines = report.stdout.split('\n');
+  }, 60000);
+
+  it('exits 0', () => {
+    expect([report.code, report.stderr]).toEqual([0, '']);
+  });
+
+  it('prints the row of the pair, with the concrete misses and the published union', () => {
+    expect(lines.slice(6, 8)).toEqual([
+      '| label | route | pair | draws | per draw | median | union | missed (find) | published | published union | missed (published) | #930 | refuted | errors | paid | production | flags |',
+      '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    ]);
+    expect(lines[8]).toBe('| gpt-5.6-sol | openai | gpt-5.6-sol + gpt-5.5 | 3 | 3/3/3 | 3 | 3 | D4, D5 | 2 | D1, D2 | D3, D4, D5 | - | 0 | 0% | $0.49 | $0.09 |  |');
+  });
+
+  it('prints a finder with no judge as such', () => {
+    expect(lines).toContain('| grok-build-0.1 | openrouter | x-ai/grok-build-0.1 (no judge yet) | 0 |  | - | 0 | - | - | - | - | - | - | - | $0.01 | - | composite |');
+  });
+
+  it('names the pair in the admission', () => {
+    expect(lines).toContain('- gpt-5.6-sol + gpt-5.5: corpus has 0 PRs, needs 3; 0 published findings on the corpus, needs 3; judge consensus unknown of 15, needs 14');
+  });
+
+  it('lists the items of stage 2 with their estimates', () => {
+    expect(lines).toContain('## Stage 2, with what the plan estimates');
+    expect(lines).toContain('| 2 | corpus: the baseline | $1.34 |');
+    expect(lines).toContain('| 5 | generic prompts: the baseline on #418 and the corpus | $2.69 |');
+  });
+
+  it('says whether the executor is visible', () => {
+    expect(lines).toContain('## Is the executor visible');
+    expect(lines).toContain('call.provider names the host on 2 of 19 calls: StubHost');
+  });
+
+  it('gives the reads per written token against the threshold', () => {
+    expect(lines).toContain('## Reads per written token, against the threshold of 0.28');
+    expect(lines).toContain('- all calls: 2400 read, 4000 written: 0.60, the write pays for itself');
+    expect(lines).toContain('- #688: 2400 read, 4000 written: 0.60, the write pays for itself');
+  });
+
+  it('counts the thinking check on the Anthropic models only', () => {
+    expect(lines).toContain('thinking looks on (3 calls)');
   });
 });
 

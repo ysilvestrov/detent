@@ -214,6 +214,23 @@ describe('planBatch', () => {
   });
 });
 
+describe('runKey', () => {
+  const whole = (verifyModel) => plan({ batch: 106, catalog, labels: ['gpt-6.1-sol'], verifyModel, verifyRoute: 'openai' })[0];
+
+  it('names the judge of a whole run', () => {
+    expect(runKey(whole('gpt-5.5'))).toBe('106|whole|gpt-6.1-sol|418|1|gpt-5.5');
+  });
+
+  it('names no judge for a find', () => {
+    expect(runKey(plan({ batch: 1, catalog })[0])).toBe('1|find|gpt-5.6-sol|418|1');
+  });
+
+  it('lets a second pair of one finder run in batch 106', () => {
+    const closed = { type: 'run', key: runKey(whole('gpt-5.5')), attempt: 1, exit: 0, error: null };
+    expect(nextAction(whole('gpt-6.1-terra'), [closed])).toEqual({ action: 'run', attempt: 1 });
+  });
+});
+
 describe('planBatch: a judge other than the finder', () => {
   const judgeRun = plan({ batch: 101, catalog, labels: ['qwen3.8-flash'], verifyModel: 'openai/gpt-5.5', verifyRoute: 'openrouter' })[1];
 

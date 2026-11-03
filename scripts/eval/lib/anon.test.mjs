@@ -145,6 +145,19 @@ describe('judges', () => {
     expect(scores).toEqual({ 'model-alpha': { 1: { findings: 1, pr: '895' } }, 'model-alpha@judge-x': { 1: { findings: 2, pr: '895' } } });
   });
 
+  it('keys two judges of one finder apart in the whole runs of batch 106', () => {
+    const whole = (judge, runId) => verifyRun(judge, runId, 106);
+    const runs = [{ ...whole('judge-x', 'r1'), mode: 'whole' }, { ...whole('judge-y', 'r2'), mode: 'whole' }];
+    const { items, key } = anonymize({ runs, read, shuffle: (list) => list });
+    const defects = { defects: ['D1'], findings: 1 };
+    expect(Object.keys(applyKey({ [items[0].id]: defects, [items[1].id]: defects }, key))).toEqual(['model-alpha@judge-x', 'model-alpha@judge-y']);
+  });
+
+  it('keeps the plain label for the whole runs of batch 101', () => {
+    const { key } = anonymize({ runs: [{ ...verifyRun('judge-x', 'r1', 101), mode: 'whole' }], read });
+    expect(Object.values(key).map((k) => k.label)).toEqual(['model-alpha']);
+  });
+
   it('keeps the plain label for a find', () => {
     expect(Object.values(anonymize({ runs: [runs[0]], read }).key).map((k) => k.label)).toEqual(['model-alpha']);
   });

@@ -11,10 +11,10 @@ const fail = (message) => {
   throw new Error(`plan: ${message}`);
 };
 
-/** Identifies a run in the shared record. A verify names its judge, since several judges check one find. */
+/** Identifies a run in the shared record. A verify or whole run names its judge, since one finder can have several. */
 export function runKey(run) {
   const parts = [run.batch, run.mode, run.label, run.pr, run.draw];
-  if (run.mode === 'verify') parts.push(run.verifyModel);
+  if (run.mode === 'verify' || run.mode === 'whole') parts.push(run.verifyModel);
   return parts.join(SEP);
 }
 
