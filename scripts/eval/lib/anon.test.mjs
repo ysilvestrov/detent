@@ -133,6 +133,11 @@ describe('judges', () => {
     expect(Object.values(key).map((k) => k.label)).toEqual(['model-alpha@judge-x', 'model-alpha@judge-y']);
   });
 
+  it('keys a judge by the id with no vendor prefix, as the summary reads it', () => {
+    const { key } = anonymize({ runs: [verifyRun('openai/gpt-5.5', 'r1', 106)], read });
+    expect(Object.values(key).map((k) => k.label)).toEqual(['model-alpha@gpt-5.5']);
+  });
+
   it('keeps the plain label for a verify outside batch 104', () => {
     const { key } = anonymize({ runs: [verifyRun('judge-x', 'r1', 7), verifyRun('judge-x', 'r2', 7)], read });
     expect(Object.values(key).map((k) => k.label)).toEqual(['model-alpha', 'model-alpha']);
@@ -241,6 +246,14 @@ describe('applyKey: the grader output is checked', () => {
     ['published', { real: 0, false: 0, unfalsifiable: 0 }],
   ])('throws naming the id for a corpus item with no %s', (field, value) => {
     expect(() => applyKey({ u1: value }, { u1: corpusItem })).toThrow(`anonymize: item u1: ${field}`);
+  });
+
+  it('throws naming the id for a null item', () => {
+    expect(() => applyKey({ u1: null }, { u1: defectItem })).toThrow('anonymize: item u1: the score must be an object');
+  });
+
+  it('throws naming the id for a null corpus item', () => {
+    expect(() => applyKey({ u1: null }, { u1: corpusItem })).toThrow('anonymize: item u1: the score must be an object');
   });
 
   it('throws for a corpus count that is not a number', () => {

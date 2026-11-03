@@ -3,6 +3,9 @@ import { priceOf } from './catalog.mjs';
 
 const PREFIX = 16;
 
+/** Who a judge is, by any route: `openai/gpt-5.5` and `gpt-5.5` are one judge. A run line keeps what really ran. */
+export const judgeId = (model) => model.slice(model.lastIndexOf('/') + 1);
+
 /** Reads KEY=value lines of a keys file; `export`, quotes, comments and blank lines are tolerated. */
 export function parseKeys(text) {
   const keys = {};

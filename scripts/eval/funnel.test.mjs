@@ -164,6 +164,21 @@ describe('--endpoints', () => {
     expect(catalog.judges[0].only).toEqual(['openai']);
   });
 
+  it.each([
+    ['no endpoints', { data: {} }],
+    ['no data', {}],
+  ])('reports a 200 with %s for its model, writes the others, and exits 5', (_name, body) => {
+    const endpoints = { ...seedEndpoints(), 'qwen/qwen3.8-flash': { status: 200, body } };
+    const s = setup({ endpoints });
+    const result = s.endpoints();
+    const catalog = s.catalog();
+    expect(result.code).toBe(5);
+    expect(result.stderr).toBe('qwen/qwen3.8-flash: /endpoints answered 200 with no endpoints; its pin in candidates.json is unchanged\n');
+    expect(row(catalog, 'qwen3.8-flash').only).toBe(null);
+    expect(row(catalog, 'grok-build-0.1').only).toEqual(['xai']);
+    expect(catalog.judges[0].only).toEqual(['openai']);
+  });
+
   it('exits 2 when no host fits, and writes the others', () => {
     const endpoints = { ...seedEndpoints(), 'x-ai/grok-build-0.1': { status: 200, endpoints: [] } };
     const s = setup({ endpoints });
@@ -515,8 +530,14 @@ describe('the owner sequence, batch 0 to the report', () => {
     it('prints the rows of one finder with each of its judges', () => {
       expect(lines).toContain('| claude-sonnet-5-5 | anthropic | claude-sonnet-5-5 + gpt-5.5 | 3 | 2/3/3 | 3 | 3 | D4, D5 | 2 | D1, D2 | D3, D4, D5 | - | 0 | 0% | $0.46 | $0.05 |  |');
       expect(lines).toContain('| claude-sonnet-5-5 | anthropic | claude-sonnet-5-5 + claude-haiku-5-5 | 3 | 2/3/3 | 3 | 3 | D4, D5 | 5 | D1, D2, D3, D4, D5 | none | - | 0 | 0% | $0.39 | $0.03 |  |');
-      expect(lines).toContain('| qwen3.8-flash | openrouter | qwen/qwen3.8-flash + gpt-5.5 | 3 | 3/3/3 | 3 | 3 | D4, D5 | 2 | D1, D2 | D3, D4, D5 | - | 1 | 0% | $0.10 | $0.03 |  |');
-      expect(lines).toContain('| qwen3.8-flash | openrouter | qwen/qwen3.8-flash + openai/gpt-5.5 | 3 | 3/3/3 | 3 | 3 | D4, D5 | - | - | - | 1 | 0 | 0% | $0.10 | $0.00 |  |');
+    });
+
+    it('keeps the two routes of the gpt-5.5 judge on one row, with the published median and #930', () => {
+      expect(lines).toContain('| qwen3.8-flash | openrouter | qwen/qwen3.8-flash + gpt-5.5 | 3 | 3/3/3 | 3 | 3 | D4, D5 | 2 | D1, D2 | D3, D4, D5 | 1 | 0.5 | 0% | $0.17 | $0.03 |  |');
+    });
+
+    it('calls a pair runnable only when its judge went through the route of the finder', () => {
+      expect(['claude-sonnet-5-5 + gpt-5.5', 'claude-opus-5-5 + gpt-5.5', 'claude-sonnet-5-5 + claude-haiku-5-5', 'qwen/qwen3.8-flash + gpt-5.5'].map((pair) => pairOf(pair).runnable)).toEqual([false, false, true, true]);
     });
 
     it('keeps batch 105 its own row', () => {
@@ -530,7 +551,6 @@ describe('the owner sequence, batch 0 to the report', () => {
         'gpt-5.6-sol + gpt-6.1-sol',
         'claude-haiku-5-5 (no judge yet)',
         'qwen/qwen3.8-flash + gpt-5.5',
-        'qwen/qwen3.8-flash + openai/gpt-5.5',
         'x-ai/grok-build-0.1 (no judge yet)',
         'gpt-6.1-terra (no judge yet)',
         'gpt-6.1-sol + gpt-5.5',
@@ -573,6 +593,7 @@ describe('the owner sequence, batch 0 to the report', () => {
         composite: false,
         corpus: { real: 3, false: 0, unfalsifiable: 0, published: 3, prs: 3 },
         corpusFrom: null,
+        runnable: true,
         judgeConsensus: 15,
         brokenCalls: 0,
         medianRecall930: 1,
