@@ -12,12 +12,20 @@ function priceOf(endpoint) {
     input: perMillion(prompt),
     output: perMillion(completion),
     ...(read === undefined ? {} : { cachedInput: perMillion(read) }),
-    ...(write === undefined ? {} : { cacheWrite: perMillion(write) }),
+    // A write price of zero means no write tariff: a `cacheWrite` of 0 would price a first run's input at nothing.
+    ...(Number(write) > 0 ? { cacheWrite: perMillion(write) } : {}),
   };
 }
 
 const cost = (endpoint) => perMillion(endpoint.pricing.prompt) + perMillion(endpoint.pricing.completion);
 const cheapest = (endpoints) => endpoints.reduce((best, e) => (best === null || cost(e) < cost(best) ? e : best), null);
+
+/** The endpoints without a host, named by its tag, the start of its tag or its provider name; `undefined` removes nobody. */
+export function withoutHost(endpoints, host) {
+  if (host === undefined) return endpoints;
+  const name = normalize(host);
+  return endpoints.filter((e) => ![e.tag, String(e.tag).split('/')[0], e.provider_name].some((known) => normalize(known) === name));
+}
 
 /**
  * The model's own host if it has `structured_outputs`; otherwise the cheapest host with them, quantized fp8 or better,

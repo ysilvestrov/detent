@@ -15,10 +15,13 @@ function parseJudges(text) {
   });
 }
 
+/** Batches whose runs the plan fixes by itself: `--labels` on one of them would be silently ignored. */
+const IGNORES_LABELS = [0, 1, 2, 3, 5, 102, 105];
+
 /** Parses the arguments into one command; an `Error` carries the text for a usage failure (exit 2). */
 export function parseArgs(argv, home) {
   const flags = new Set(['--preflight', '--endpoints', '--allow-dirty']);
-  const withValue = ['--keys', '--batch', '--ceiling', '--labels', '--verify-model', '--verify-route', '--judges', '--repo', '--note-spend', '--reason'];
+  const withValue = ['--keys', '--batch', '--ceiling', '--labels', '--verify-model', '--verify-route', '--judges', '--repo', '--note-spend', '--reason', '--exclude-host', '--detent', '--out-root'];
   const values = {};
   const on = new Set();
   for (let i = 0; i < argv.length; i++) {
@@ -34,13 +37,17 @@ export function parseArgs(argv, home) {
   const repo = values['--repo'] ?? join(home, 'projects', 'warsaw-beer-bot');
   const labels = values['--labels']?.split(',').filter(Boolean);
 
-  if (on.has('--preflight')) return { command: 'preflight', repo };
-  if (on.has('--endpoints')) return { command: 'endpoints', labels };
+  // Undefined means today's paths, which funnel.mjs knows.
+  const roots = { detent: values['--detent'], outRoot: values['--out-root'] };
+
+  if (values['--exclude-host'] !== undefined && !on.has('--endpoints')) fail('--exclude-host goes with --endpoints');
+  if (on.has('--preflight')) return { command: 'preflight', repo, ...roots };
+  if (on.has('--endpoints')) return { command: 'endpoints', labels, excludeHost: values['--exclude-host'], ...roots };
   if (values['--note-spend'] !== undefined) {
     const usd = Number(values['--note-spend']);
     if (!Number.isFinite(usd) || usd < 0) fail('--note-spend needs a number of dollars, zero or more');
     if (values['--reason'] === undefined) fail('--note-spend needs --reason');
-    return { command: 'note-spend', usd, reason: values['--reason'] };
+    return { command: 'note-spend', usd, reason: values['--reason'], ...roots };
   }
   if (values['--batch'] === undefined) fail('nothing to do: pass --batch, --preflight, --endpoints or --note-spend');
   const batch = Number(values['--batch']);
@@ -48,8 +55,10 @@ export function parseArgs(argv, home) {
   if (values['--keys'] === undefined) fail('--keys is required');
   const ceilingUsd = Number(values['--ceiling']);
   if (!(ceilingUsd > 0)) fail('--ceiling needs a positive number');
+  if (labels !== undefined && IGNORES_LABELS.includes(batch)) fail(`batch ${batch} ignores --labels: its runs are fixed by the plan`);
   return {
     command: 'batch',
+    ...roots,
     keys: values['--keys'],
     batch,
     ceilingUsd,

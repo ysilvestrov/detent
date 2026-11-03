@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { loadCatalog, priceOf } from './catalog.mjs';
+import { callUsd } from './records.mjs';
 
 const text = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'candidates.json'), 'utf8');
 const catalog = loadCatalog(text);
@@ -34,19 +35,43 @@ describe('candidates.json', () => {
 
 describe('priceOf', () => {
   it('finds a dated model by the longest id it starts with', () => {
-    expect(priceOf(catalog, 'gpt-5.5-2026-01-01')).toEqual({ input: 5, output: 30 });
+    expect(priceOf(catalog, 'gpt-5.5-2026-01-01')).toEqual({ input: 5, cachedInput: 0.5, output: 30 });
   });
 
   it('prefers the exact id to a shorter prefix', () => {
-    expect(priceOf(catalog, 'gpt-5.6-sol')).toEqual({ input: 4, cacheWrite: 5, output: 20 });
+    expect(priceOf(catalog, 'gpt-5.6-sol')).toEqual({ input: 4, cachedInput: 0.4, cacheWrite: 5, output: 20 });
   });
 
   it('finds a candidate by its provider id', () => {
-    expect(priceOf(catalog, 'moonshotai/kimi-k3.1-pro')).toEqual({ input: 2, output: 10 });
+    const small = { prices: {}, candidates: [{ model: 'vendor/m', price: { input: 2, output: 10 } }], judges: [] };
+    expect(priceOf(small, 'vendor/m')).toEqual({ input: 2, output: 10 });
+  });
+
+  it('finds a judge by its model', () => {
+    const small = { prices: {}, candidates: [], judges: [{ model: 'openai/j', only: null, price: { input: 5, output: 30 } }] };
+    expect(priceOf(small, 'openai/j')).toEqual({ input: 5, output: 30 });
   });
 
   it('gives null for an unknown model', () => {
     expect(priceOf(catalog, 'невідома')).toBeNull();
+  });
+});
+
+describe('the cached prices of the direct OpenAI models', () => {
+  const cachedFind = { type: 'call', model: 'gpt-5.6-sol', usage: { prompt_tokens: 41400, completion_tokens: 4600, prompt_tokens_details: { cached_tokens: 40000 } } };
+
+  it('prices a repeat find with 40k of 41.4k cached at what it cost', () => {
+    expect(callUsd(cachedFind, catalog).usd).toBe(0.1136);
+  });
+
+  it('holds the rates of src/pr-review/usage.ts', () => {
+    expect([catalog.prices['gpt-5.5'].cachedInput, catalog.prices['gpt-5.6-sol'].cachedInput]).toEqual([0.5, 0.4]);
+  });
+});
+
+describe('the judges of candidates.json', () => {
+  it('lists openai/gpt-5.5', () => {
+    expect(catalog.judges.map((j) => j.model)).toEqual(['openai/gpt-5.5']);
   });
 });
 
@@ -59,5 +84,28 @@ describe('loadCatalog', () => {
     const broken = JSON.parse(text);
     delete broken.candidates[0].route;
     expect(() => loadCatalog(JSON.stringify(broken))).toThrow('route');
+  });
+
+  it('accepts a dropped row with its reason', () => {
+    const edited = JSON.parse(text);
+    edited.candidates[0].dropped = 'empty answer twice';
+    expect(loadCatalog(JSON.stringify(edited)).candidates[0].dropped).toBe('empty answer twice');
+  });
+
+  it('refuses a dropped row with no reason', () => {
+    const broken = JSON.parse(text);
+    broken.candidates[0].dropped = '';
+    expect(() => loadCatalog(JSON.stringify(broken))).toThrow('candidates[0].dropped');
+  });
+
+  it.each([
+    ['no judges', (c) => delete c.judges, 'invalid or missing judges'],
+    ['a judge with no model', (c) => delete c.judges[0].model, 'judges[0].model'],
+    ['a judge with a bad pin', (c) => (c.judges[0].only = 'host'), 'judges[0].only'],
+    ['a judge with no price', (c) => delete c.judges[0].price, 'judges[0].price'],
+  ])('refuses %s', (_name, spoil, message) => {
+    const broken = JSON.parse(text);
+    spoil(broken);
+    expect(() => loadCatalog(JSON.stringify(broken))).toThrow(message);
   });
 });

@@ -220,7 +220,7 @@ async function execute({ run, attempt, keys, base, repo, recordsDir, tmpDir, spa
  * Runs the planned runs in order, each only if it and one more like it fit under the ceiling.
  * `code`: 0 all done, 2 refused before spending, 3 stopped at the ceiling, 4 a key was found in a line, 5 a run failed.
  */
-export async function runBatch({ runs, catalog, keys, ceilingUsd, recordsDir, tmpDir, spawnRun, out, repo, base = process.env }) {
+export async function runBatch({ runs, catalog, keys, ceilingUsd, reserveUsd = 0, recordsDir, tmpDir, spawnRun, out, repo, base = process.env }) {
   const result = { code: 0, spentUsd: 0, done: 0, failed: 0, left: 0, notApplicable: 0 };
   let warnedUnpriced = 0;
   const spend = (lines) => {
@@ -283,8 +283,9 @@ export async function runBatch({ runs, catalog, keys, ceilingUsd, recordsDir, tm
       }
 
       result.spentUsd = spend(lines);
-      if (!admit({ spentUsd: result.spentUsd, estimateUsd: run.estimateUsd, ceilingUsd })) {
-        out(`stop at the ceiling: spent ${result.spentUsd.toFixed(2)} of ${ceilingUsd}, ${pending(i)} run(s) left`);
+      if (!admit({ spentUsd: result.spentUsd, estimateUsd: run.estimateUsd, ceilingUsd: ceilingUsd - reserveUsd })) {
+        const held = reserveUsd === 0 ? '' : `, ${reserveUsd} of it held back`;
+        out(`stop at the ceiling: spent ${result.spentUsd.toFixed(2)} of ${ceilingUsd}${held}, ${pending(i)} run(s) left`);
         return { ...result, code: EXIT.ceiling, left: pending(i) };
       }
 

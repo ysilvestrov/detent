@@ -149,6 +149,22 @@ describe('runBatch', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('holds the reserve back from the ceiling', async () => {
+    const s = setup();
+    const { spawnRun, calls } = stub([]);
+    const result = await runBatch({ ...s.common, ceilingUsd: 3, reserveUsd: 2.9, runs: [run()], spawnRun });
+    expect(calls).toHaveLength(0);
+    expect(result).toEqual({ code: 3, spentUsd: 0, done: 0, failed: 0, left: 1, notApplicable: 0 });
+    expect(s.out).toEqual(['stop at the ceiling: spent 0.00 of 3, 2.9 of it held back, 1 run(s) left']);
+  });
+
+  it('runs what fits under the ceiling less the reserve', async () => {
+    const s = setup();
+    const { spawnRun, calls } = stub([ok(0.1)]);
+    await runBatch({ ...s.common, ceilingUsd: 3.5, reserveUsd: 2.9, runs: [run()], spawnRun });
+    expect(calls).toHaveLength(1);
+  });
+
   it('keeps the order of the plan', async () => {
     const s = setup();
     const { spawnRun, calls } = stub([ok(), ok(), ok()]);

@@ -64,6 +64,8 @@ export function callUsd(line, catalog) {
     cached * (price.cachedInput ?? price.input) +
     written * (price.cacheWrite ?? price.input) +
     usage.completion_tokens * price.output;
+  // A usage object without its token fields gives NaN, which would stop every later admit for good.
+  if (!Number.isFinite(perMillion)) return { usd: 0, source: 'unpriced' };
   return { usd: perMillion / 1e6, source: 'table' };
 }
 
@@ -72,7 +74,8 @@ export function totalSpend(lines, catalog) {
   let usd = 0;
   let unpriced = 0;
   for (const line of lines) {
-    if (line.type === 'manual') usd += line.usd;
+    if (line.type === 'manual' && Number.isFinite(line.usd)) usd += line.usd;
+    if (line.type === 'manual' && !Number.isFinite(line.usd)) unpriced += 1;
     if (line.type !== 'call') continue;
     const cost = callUsd(line, catalog);
     usd += cost.usd;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chooseExecutor } from './executors.mjs';
+import { chooseExecutor, withoutHost } from './executors.mjs';
 
 const endpoint = (over) => ({
   provider_name: 'Other',
@@ -34,6 +34,15 @@ describe('chooseExecutor', () => {
     expect(chooseExecutor('alibaba', [own])).toEqual({ tag: 'alibaba', price: { input: 0.15, output: 0.47, cachedInput: 0.016, cacheWrite: 0.2 } });
   });
 
+  it('writes no cacheWrite for a host whose write price is zero', () => {
+    const own = endpoint({
+      provider_name: 'Alibaba',
+      tag: 'alibaba',
+      pricing: { prompt: '0.00000015', completion: '0.00000047', input_cache_read: '0.000000016', input_cache_write: '0' },
+    });
+    expect(chooseExecutor('alibaba', [own])).toEqual({ tag: 'alibaba', price: { input: 0.15, output: 0.47, cachedInput: 0.016 } });
+  });
+
   it('rejects a quantization below fp8 and an uptime below 100', () => {
     const fp4 = endpoint({ tag: 'fp4', quantization: 'fp4', pricing: { prompt: '0.0000001', completion: '0.0000001' } });
     const flaky = endpoint({ tag: 'flaky', uptime_last_30m: 99, pricing: { prompt: '0.0000001', completion: '0.0000001' } });
@@ -47,5 +56,26 @@ describe('chooseExecutor', () => {
 
   it('returns null when nobody fits', () => {
     expect(chooseExecutor('nobody', [endpoint({ supported_parameters: ['max_tokens'] }), endpoint({ uptime_last_30m: 80 })])).toBe(null);
+  });
+});
+
+describe('withoutHost', () => {
+  const alibaba = endpoint({ provider_name: 'Alibaba Cloud', tag: 'alibaba/fp8' });
+  const other = endpoint({ provider_name: 'Other', tag: 'other' });
+
+  it('removes a host named by its whole tag', () => {
+    expect(withoutHost([alibaba, other], 'alibaba/fp8')).toEqual([other]);
+  });
+
+  it('removes every tag of a host named by the start of the tag', () => {
+    expect(withoutHost([alibaba, endpoint({ tag: 'alibaba/fp16' }), other], 'alibaba')).toEqual([other]);
+  });
+
+  it('removes a host named by its provider name', () => {
+    expect(withoutHost([alibaba, other], 'Alibaba Cloud')).toEqual([other]);
+  });
+
+  it('leaves the list alone when no host is named', () => {
+    expect(withoutHost([alibaba, other], undefined)).toEqual([alibaba, other]);
   });
 });

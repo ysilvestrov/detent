@@ -79,30 +79,40 @@ function pinOf(entry) {
   return entry.only;
 }
 
+/** A judge's own host pin: its `judges` row, else a candidate with the same model. */
 function judgePin(catalog, judge) {
   if (judge.route !== 'openrouter') return null;
+  const row = (catalog.judges ?? []).find((j) => j.model === judge.model);
+  if (row) {
+    if (row.only === null) fail(`judge ${judge.model} is on openrouter with no pinned host; run --endpoints and set "only" first`);
+    return row.only;
+  }
   const entry = catalog.candidates.find((c) => c.model === judge.model && c.route === 'openrouter');
-  if (!entry) fail(`judge ${judge.model} is on openrouter with no candidate to take the host pin from; run --endpoints`);
+  if (!entry) fail(`judge ${judge.model} is on openrouter with no judges row or candidate to take the host pin from; add one and run --endpoints`);
   return pinOf(entry);
 }
 
 export function planBatch({ batch, catalog, labels, verifyModel, verifyRoute, judges, preflight }) {
   const base = catalog.baseline;
   const baseEntry = { label: base.label, model: base.findModel, route: base.route, only: null };
-  const tier = (name) => catalog.candidates.filter((c) => c.tier === name);
+  const live = catalog.candidates.filter((c) => c.dropped === undefined);
+  const tier = (name) => live.filter((c) => c.tier === name);
   const defaultJudge = { model: base.verifyModel, route: 'openai' };
+
+  // Only batch 0 runs before the preflight; a preflight that refused left no file, so #418 stays stopped too.
+  if (batch !== 0 && !preflight) fail(`batch ${batch} needs the preflight`);
 
   const chosen = () => {
     if (!Array.isArray(labels)) fail(`batch ${batch} needs labels`);
-    return labels.map((label) => catalog.candidates.find((c) => c.label === label) ?? fail(`unknown label ${label}`));
+    return labels.map((label) => {
+      const entry = catalog.candidates.find((c) => c.label === label) ?? fail(`unknown label ${label}`);
+      if (entry.dropped !== undefined) fail(`${label} is dropped: ${entry.dropped}`);
+      return entry;
+    });
   };
   const need = (value, name, entry) => value ?? fail(`a whole run of ${entry.label} needs ${name}`);
-  const corpus = () => {
-    if (!preflight) fail(`batch ${batch} needs the preflight`);
-    return catalog.corpus.filter((pr) => preflight.corpus.includes(pr));
-  };
+  const corpus = () => catalog.corpus.filter((pr) => preflight.corpus.includes(pr));
   const recall930 = () => {
-    if (!preflight) fail(`batch ${batch} needs the preflight`);
     if (!preflight.recall930) fail('the preflight dropped #930');
     return '930';
   };
@@ -132,7 +142,7 @@ export function planBatch({ batch, catalog, labels, verifyModel, verifyRoute, ju
       ...common,
       route: entry.route,
       verifyModel: model,
-      only: { find: pin, verify: route === 'openrouter' ? pin : null },
+      only: { find: pin, verify: judgePin(catalog, { model, route }) },
       estimateUsd: findUsd(catalog, entry.model, pr) + verifyUsd(catalog, model),
     };
   };
@@ -144,7 +154,7 @@ export function planBatch({ batch, catalog, labels, verifyModel, verifyRoute, ju
 
   switch (batch) {
     case 0: {
-      const all = [baseEntry, ...catalog.candidates];
+      const all = [baseEntry, ...live];
       return [
         ...rounds(all, [1], { pr: '895', mode: 'find' }),
         make({ entry: baseEntry, pr: '688', draw: 1, mode: 'find' }),
@@ -168,8 +178,10 @@ export function planBatch({ batch, catalog, labels, verifyModel, verifyRoute, ju
       return rounds(tier('expensive'), [1, 2], { pr: '418', mode: 'find' });
     case 6:
       return rounds(chosen(), [3], { pr: '418', mode: 'find' });
-    case 7:
-      return chosen().flatMap((entry) => DRAWS.map((draw) => verifyOf(entry, '418', draw, defaultJudge)));
+    case 7: {
+      const entries = chosen();
+      return DRAWS.flatMap((draw) => entries.map((entry) => verifyOf(entry, '418', draw, defaultJudge)));
+    }
     case 101:
       return rounds([baseEntry, ...chosen()], DRAWS, { pr: recall930(), mode: 'whole' });
     case 102:
