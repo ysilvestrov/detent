@@ -1,0 +1,20 @@
+{
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "denyRead": ["~/"],
+      "allowRead": ["~/projects/detent", "~/projects/warsaw-beer-bot", "~/.nvm", "~/.config/detent/keys.env"],
+      "allowWrite": ["~/.npm"]
+    },
+    "network": {
+      "allowedDomains": ["api.openai.com", "api.anthropic.com", "openrouter.ai", "github.com", "api.github.com", "registry.npmjs.org"]
+    }
+  },
+  "permissions": {
+    "blockReadsOutsideWorkingDirectories": true,
+    "blockWritesOutsideWorkingDirectories": true,
+    "deny": ["WebFetch", "WebSearch", "Bash(git push *)"]
+  }
+}
