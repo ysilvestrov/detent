@@ -97,6 +97,7 @@ async function preflightCommand(args) {
     mkdirSync(evalDir, { recursive: true });
     writeFileSync(preflightFile, `${JSON.stringify(preflight, null, 2)}\n`);
   }
+  if (code !== 0 && existsSync(preflightFile)) say(`${preflightFile} from an earlier preflight still stands, and later batches will use it`);
   return code;
 }
 
