@@ -344,6 +344,17 @@ describe('callStructured: onResponse', () => {
     expect(counter.fetches).toBe(3);
   });
 
+  it('keeps retrying a body of JSON null when there is no hook', async () => {
+    let fetches = 0;
+    const fetchFn = (async () => {
+      fetches++;
+      return { ok: true, status: 200, json: async () => null } as unknown as Response;
+    }) as unknown as typeof fetch;
+    const err = (await callStructured(deps(fetchFn), msgs, fmt).catch((e) => e)) as Error;
+    expect(err.message).toContain('request failed after 3 attempts');
+    expect(fetches).toBe(3);
+  });
+
   it('gives null for the fields a response leaves out', async () => {
     const seen: CallInfo[] = [];
     const fetchFn = respond({ choices: [{ message: { content: 'a' } }] });

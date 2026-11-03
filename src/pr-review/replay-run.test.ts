@@ -100,7 +100,7 @@ function makeFetch(override: Partial<Record<Stage, () => Response>> = {}): {
 async function replay(
   args: Omit<ReplayArgs, 'pr'>,
   p: { env?: ReplayIo['env']; fetchFn: typeof fetch },
-): Promise<{ code: number; out: string[]; err: string[]; head: string }> {
+): Promise<{ code: number; out: string[]; err: string[] }> {
   const { cwd, head } = makeRepo();
   const out: string[] = [];
   const err: string[] = [];
@@ -108,7 +108,7 @@ async function replay(
     { pr: '1', ...args },
     { cwd, env: p.env ?? { OPENAI_API_KEY: KEY }, out: (l) => out.push(l), err: (l) => err.push(l), fetchFn: p.fetchFn, gh: stubGh(head) },
   );
-  return { code, out, err, head };
+  return { code, out, err };
 }
 
 const recordPath = (name = 'r.jsonl'): string => join(mkdtempSync(join(tmpdir(), 'detent-record-')), name);
@@ -140,8 +140,8 @@ function repoWith(change: Record<string, string>): { cwd: string; head: string }
 }
 
 /** Several runs over one repository: the head must be the same for a find and the verify that follows it. */
-function inRepo(change?: Record<string, string>): { cwd: string; head: string; run: Run } {
-  const { cwd, head } = change ? repoWith(change) : makeRepo();
+function inRepo(change: Record<string, string> = { 'a.ts': 'export const a = 0;\nconst x = 1;\n' }): { cwd: string; head: string; run: Run } {
+  const { cwd, head } = repoWith(change);
   const run: Run = async (args, p) => {
     const out: string[] = [];
     const err: string[] = [];
@@ -471,7 +471,7 @@ describe('replay run line, failures and edge cases', () => {
   const OPENROUTER = { OPENROUTER_API_KEY: KEY, AI_REVIEW_MODEL: 'f/model', AI_REVIEW_VERIFY_MODEL: 'v/model' };
   const bodyOf = (raw: string): Record<string, any> => JSON.parse(raw) as Record<string, any>;
   const tempFile = (): string => join(mkdtempSync(join(tmpdir(), 'detent-findings-')), 'f.json');
-  const STANDARD_KEYS = ['model', 'max_completion_tokens', 'response_format', 'messages'];
+  const STANDARD_KEYS = ['model', 'max_completion_tokens', 'response_format', 'messages', 'provider'];
   const TWO_FILES = { 'a.ts': 'export const a = 0;\nconst x = 1;\n', 'b.ts': 'export const b = 0;\nconst y = 2;\n' };
   const twoFindings = (): Response =>
     completion(JSON.stringify({ findings: [FINDING, { ...FINDING, file: 'b.ts', quote: 'const y = 2;', claim: 'y is a constant' }] }));
@@ -490,7 +490,24 @@ describe('replay run line, failures and edge cases', () => {
     const lines = readRecord(path);
     expect(bodies.map((b) => bodyOf(b).response_format.json_schema.name)).toEqual(['review_findings', 'review_verdicts']);
     expect(lines.map((l) => l.type)).toEqual(['call', 'run']);
-    expect(lines[1]).toMatchObject({ exit: 5, error: expect.stringContaining('disk full') });
+    expect(lines[1]).toMatchObject({ exit: 5, error: 'disk full' });
+  });
+
+  it('a failed record write in the find stage sends one request and ends the run with exit 5', async () => {
+    const repo = inRepo(TWO_FILES);
+    const path = recordPath();
+    const { fetchFn, bodies } = makeFetch({ review_findings: twoFindings });
+    faults.failWritesOf = 'find';
+    try {
+      await expect(repo.run({ record: path }, { fetchFn })).rejects.toThrow('disk full');
+    } finally {
+      faults.failWritesOf = null;
+    }
+
+    const lines = readRecord(path);
+    expect(bodies.map((b) => bodyOf(b).response_format.json_schema.name)).toEqual(['review_findings']);
+    expect(lines.map((l) => l.type)).toEqual(['run']);
+    expect(lines[0]).toMatchObject({ exit: 5, error: 'OpenAI response hook failed: Error: disk full' });
   });
 
   it('a verify that fails for every finding exits 0 and says so on the run line and on stderr', async () => {
@@ -507,16 +524,11 @@ describe('replay run line, failures and edge cases', () => {
   it('a verify that fails for one of two files counts only that finding', async () => {
     const repo = inRepo(TWO_FILES);
     const path = recordPath();
-    let verdictCalls = 0;
-    const { fetchFn } = makeFetch({
-      review_findings: twoFindings,
-      review_verdicts: () => {
-        verdictCalls++;
-        return verdictCalls === 1
-          ? new Response('bad', { status: 400 })
-          : completion(JSON.stringify({ verdicts: [{ index: 1, verdict: 'confirmed', evidence: 'there' }] }));
-      },
-    });
+    const replies = [
+      (): Response => new Response('bad', { status: 400 }),
+      (): Response => completion(JSON.stringify({ verdicts: [{ index: 1, verdict: 'confirmed', evidence: 'there' }] })),
+    ];
+    const { fetchFn } = makeFetch({ review_findings: twoFindings, review_verdicts: () => replies.shift()!() });
     const { code } = await repo.run({ record: path }, { fetchFn });
 
     expect(code).toBe(0);
@@ -564,7 +576,7 @@ describe('replay run line, failures and edge cases', () => {
     const { fetchFn, bodies } = makeFetch();
     await replay({ record: path }, { fetchFn, env: { ...OPENROUTER, ...extra } });
 
-    expect(bodies.map((b) => Object.keys(bodyOf(b)).slice(0, 4))).toEqual([STANDARD_KEYS, STANDARD_KEYS]);
+    expect(bodies.map((b) => Object.keys(bodyOf(b)))).toEqual([STANDARD_KEYS, STANDARD_KEYS]);
     expect(readRecord(path).at(-1)).toMatchObject({ cacheMode: 'default' });
   });
 
