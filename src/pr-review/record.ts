@@ -4,7 +4,7 @@
 // every paid call behind. The `run` line closes the run; a run without one is broken, and the
 // evaluation counts its calls as spend but does not score it
 // (spec 2026-11-03-pr-review-big-test-design.md, «Формат запису»).
-import { closeSync, fstatSync, mkdirSync, openSync, writeSync } from 'node:fs';
+import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { CallInfo } from './openai.js';
 import type { Confidence, DropReason, Severity, Verdict } from './types.js';
@@ -70,7 +70,7 @@ export function openRecord(path: string, runId: string): RecordWriter {
     throw new Error(`${path} is a directory`);
   }
   const append = (line: CallLine | RunLine): void => {
-    writeSync(fd, `${JSON.stringify(line)}\n`);
+    appendFileSync(fd, `${JSON.stringify(line)}\n`);
   };
   return {
     call: (stage, info) => append({ type: 'call', runId, stage, ...info }),

@@ -53,7 +53,7 @@ export interface OpenAiDeps {
   providerName?: string;
   /** Extra top-level request fields, appended after the standard ones. */
   extraBody?: Record<string, unknown>;
-  /** Called with every HTTP 200 response, including an empty completion that is about to throw. */
+  /** Called with every HTTP 200 response, including an empty completion that is about to throw and a body that could not be read (all-null info). */
   onResponse?: (info: CallInfo) => void;
 }
 
@@ -143,39 +143,60 @@ async function request(
         throw new NonRetryableError(`${name} HTTP ${res.status}: ${text.slice(0, 300)}`);
       }
 
-      const data = (await res.json()) as {
+      type Body = {
         id?: string;
         model?: string;
         provider?: string;
         choices?: Array<{ finish_reason?: string; message?: { content?: string } }>;
         usage?: unknown;
       };
-      const content = data.choices?.[0]?.message?.content;
-      // Before the empty-content check: that call was billed too. A throw from the hook is
-      // not swallowed — a failed write must be seen — but it is not retried either: the call
-      // is already paid for, and a retry would pay again and call the hook twice.
+      // A throw from the hook is not swallowed — a failed write must be seen — but it is not retried
+      // either: the call is already paid for, and a retry would pay again and call the hook twice.
+      const report = (info: CallInfo, usage: unknown): void => {
+        try {
+          deps.onResponse?.(info);
+        } catch (hookErr) {
+          throw new NonRetryableError(`${name} response hook failed: ${String(hookErr)}`, parseUsage(usage));
+        }
+      };
+
+      let data: Body | null;
       try {
-        deps.onResponse?.({
-          id: data.id ?? null,
-          model: data.model ?? null,
-          provider: data.provider ?? null,
-          finishReason: data.choices?.[0]?.finish_reason ?? null,
-          contentLength: content?.length ?? 0,
-          usage: data.usage ?? null,
-        });
-      } catch (hookErr) {
-        throw new NonRetryableError(`${name} response hook failed: ${String(hookErr)}`, parseUsage(data.usage));
+        data = (await res.json()) as Body | null;
+      } catch (readErr) {
+        if (!deps.onResponse) throw readErr;
+        data = null;
       }
+      // With a hook (the replay) a 200 is a billed generation, so a body that cannot be read is
+      // recorded as an empty response and not retried. Without one (CI) it keeps retrying as before.
+      if (deps.onResponse && (typeof data !== 'object' || data === null)) {
+        report({ id: null, model: null, provider: null, finishReason: null, contentLength: 0, usage: null }, null);
+        throw new NonRetryableError(`${name} returned a response body that could not be read`);
+      }
+      const body = data!;
+      const content = body.choices?.[0]?.message?.content;
+      // Before the empty-content check: that call was billed too.
+      report(
+        {
+          id: body.id ?? null,
+          model: body.model ?? null,
+          provider: body.provider ?? null,
+          finishReason: body.choices?.[0]?.finish_reason ?? null,
+          contentLength: content?.length ?? 0,
+          usage: body.usage ?? null,
+        },
+        body.usage,
+      );
       if (!content) {
         // Measured in production 2026-09-23 (warsaw-beer-bot#691): a reasoning model can spend the
         // whole `max_completion_tokens` budget thinking and emit no content. The call
         // is billed for every one of those tokens, so the usage travels with the
         // failure.
-        throw new NonRetryableError(`${name} returned an empty completion`, parseUsage(data.usage));
+        throw new NonRetryableError(`${name} returned an empty completion`, parseUsage(body.usage));
       }
       // Usage is read from the same response as the content, so a call can never
       // be published without being billed for in the footer.
-      return { content, usage: parseUsage(data.usage) };
+      return { content, usage: parseUsage(body.usage) };
     } catch (err) {
       if (err instanceof NonRetryableError) throw err;
       lastErr = err;
