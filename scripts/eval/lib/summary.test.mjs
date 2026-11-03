@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { anonymize, applyKey } from './anon.mjs';
-import { anthropicThinking, cacheFields, median, paidByRoute, paidUsd, productionUsd, summarize } from './summary.mjs';
+import {
+  anthropicCalls,
+  anthropicThinking,
+  baselineRowOf,
+  cacheFields,
+  executorVisibility,
+  median,
+  paidByRoute,
+  paidUsd,
+  productionUsd,
+  readsPerWrite,
+  stage2Items,
+  summarize,
+} from './summary.mjs';
 
 const catalog = {
   baseline: { label: 'base', findModel: 'gpt-5.6-sol', verifyModel: 'gpt-5.5', route: 'openai' },
@@ -288,7 +301,7 @@ describe('summarize: batch 105 is the generic-prompts row', () => {
 });
 
 describe('summarize: broken calls', () => {
-  it('skips the verify probe of batch 0 and every call of batch 104', () => {
+  it('skips the verify probe of batch 0, and a batch 104 call with no judge row to go on', () => {
     const lines = [
       call({ key: '0|verify|alpha|688|1|gpt-5.5', stage: 'verify', contentLength: 0 }),
       call({ key: '104|verify|alpha|418|1|judge-x', stage: 'verify', contentLength: 0 }),
@@ -296,6 +309,275 @@ describe('summarize: broken calls', () => {
       call({ key: '0|find|alpha|895|1', contentLength: 0 }),
     ];
     expect(rowOf(summarize({ lines, catalog, scores: noScores, cacheRuleApplies: false }), 'alpha').brokenCalls).toBe(2);
+  });
+});
+
+describe('summarize: one row is one pair', () => {
+  const pairRun = (batch, judge, draw, over = {}) =>
+    run({ batch, mode: batch === 106 ? 'whole' : 'verify', verifyModel: judge, draw, key: `${batch}|${batch === 106 ? 'whole' : 'verify'}|alpha|418|${draw}|${judge}`, ...over });
+  const draws = (defects) => ({ 1: score(defects), 2: score(defects), 3: score(defects) });
+  const lines = [
+    ...[1, 2, 3].map((draw) => run({ draw, key: `2|find|alpha|418|${draw}` })),
+    ...[1, 2, 3].map((draw) => pairRun(7, 'gpt-5.5', draw)),
+    ...[1, 2, 3].map((draw) => pairRun(106, 'judge-x', draw)),
+  ];
+  const scores = {
+    batches: { 2: { alpha: draws(['D1', 'D2', 'D3']) }, 7: { alpha: draws(['D1', 'D2']) }, 106: { 'alpha@judge-x': draws(['D1', 'D2', 'D3', 'D4', 'D5']) } },
+    judges: { 'gpt-5.5': 15, 'judge-x': 12 },
+  };
+  const rows = summarize({ lines, catalog, scores, cacheRuleApplies: false });
+
+  it('gives each judge of a finder its own row, with its own published median and consensus', () => {
+    expect(rows.map((r) => [r.label, r.judge, r.pair, r.medianPublished, r.judgeConsensus, r.composite])).toEqual([
+      ['alpha', 'gpt-5.5', 'vendor/alpha + gpt-5.5', 2, 15, false],
+      ['alpha', 'judge-x', 'vendor/alpha + judge-x', 5, 12, false],
+    ]);
+  });
+
+  it('repeats the find-stage fields of the finder on each of its rows', () => {
+    expect(rows.map((r) => [r.draws, r.perDraw, r.medianKnown, r.union, r.findDefects])).toEqual([
+      [3, [3, 3, 3], 3, 3, ['D1', 'D2', 'D3']],
+      [3, [3, 3, 3], 3, 3, ['D1', 'D2', 'D3']],
+    ]);
+  });
+
+  it('gives a finder with no judge yet one row with a null judge', () => {
+    const [row] = summarize({ lines: [run({})], catalog, scores: { batches: {}, judges: { 'gpt-5.5': 15 } }, cacheRuleApplies: false });
+    expect([row.judge, row.pair, row.composite, row.judgeConsensus]).toEqual([null, 'vendor/alpha (no judge yet)', true, null]);
+  });
+
+  it('carries the tier of the candidate, and none for the baseline', () => {
+    const both = [run({}), run({ label: 'base', key: '1|find|base|418|1', batch: 1 })];
+    expect(summarize({ lines: both, catalog, scores: noScores, cacheRuleApplies: false }).map((r) => [r.label, r.tier])).toEqual([['base', null], ['alpha', 'cheap']]);
+  });
+
+  it('marks a dropped candidate', () => {
+    const edited = { ...catalog, candidates: [{ ...catalog.candidates[0], dropped: 'empty twice' }] };
+    expect(summarize({ lines: [run({})], catalog: edited, scores: noScores, cacheRuleApplies: false })[0].dropped).toBe(true);
+  });
+
+  describe('batch 104', () => {
+    const verdict = (name) => ({ verdict: name });
+    const judged = (judge, results) => run({ batch: 104, mode: 'verify', verifyModel: judge, key: `104|verify|alpha|418|1|${judge}`, results });
+    const lines104 = [run({}), judged('judge-x', [verdict('refuted'), verdict('confirmed')]), judged('judge-y', [verdict('confirmed')])];
+    const scores104 = {
+      batches: { 104: { 'alpha@judge-x': { 1: score(['D1']) }, 'alpha@judge-y': { 1: score(['D1', 'D2']) } } },
+      judges: { 'judge-x': 14 },
+    };
+    const rows104 = summarize({ lines: lines104, catalog, scores: scores104, cacheRuleApplies: false });
+
+    it('gives a row per judge on draw 1, not composite, with its consensus', () => {
+      expect(rows104.map((r) => [r.judge, r.medianPublished, r.composite, r.judgeConsensus])).toEqual([
+        ['judge-x', 1, false, 14],
+        ['judge-y', 2, false, null],
+      ]);
+    });
+
+    it('keeps refuted per pair', () => {
+      expect(rows104.map((r) => r.refutedMean)).toEqual([1, 0]);
+    });
+  });
+
+  it('is composite while that judge did not verify this finder cleanly', () => {
+    const failed = run({ batch: 7, mode: 'verify', verifyModel: 'gpt-5.5', key: '7|verify|alpha|418|1|gpt-5.5', exit: 5, error: 'boom' });
+    const [row] = summarize({ lines: [run({}), failed], catalog, scores: noScores, cacheRuleApplies: false });
+    expect([row.judge, row.composite]).toEqual(['gpt-5.5', true]);
+  });
+
+  it('keeps the error share of a judge on its own row', () => {
+    const judged = (judge, verdict) => run({ batch: 7, mode: 'verify', verifyModel: judge, key: `7|verify|alpha|418|1|${judge}`, results: [{ verdict }] });
+    const both = summarize({ lines: [judged('j1', 'error'), judged('j2', 'confirmed')], catalog, scores: noScores, cacheRuleApplies: false });
+    expect(both.map((r) => r.errorShare)).toEqual([1, 0]);
+  });
+
+  it('pays each row for the find and its own judge only', () => {
+    const paid = [
+      run({}),
+      pairRun(7, 'j1', 1),
+      pairRun(7, 'j2', 1),
+      call({ usage: { cost: 0.5 } }),
+      call({ stage: 'verify', key: '7|verify|alpha|418|1|j1', requestedModel: 'j1', usage: { cost: 0.25 } }),
+      call({ stage: 'verify', key: '7|verify|alpha|418|1|j2', requestedModel: 'j2', usage: { cost: 0.125 } }),
+    ];
+    const both = summarize({ lines: paid, catalog, scores: noScores, cacheRuleApplies: false });
+    expect(both.map((r) => r.paidUsd)).toEqual([0.75, 0.625]);
+  });
+
+  it('prices each row with the verify of its own judge, and gives the judge part apart', () => {
+    const edited = { ...catalog, prices: { ...catalog.prices, j1: { input: 1, output: 1 }, j2: { input: 2, output: 2 } } };
+    const priced = [
+      run({}),
+      pairRun(7, 'j1', 1),
+      pairRun(104, 'j2', 1),
+      call({}),
+      call({ stage: 'verify', key: '7|verify|alpha|418|1|j1', requestedModel: 'j1', usage: { prompt_tokens: 1000, completion_tokens: 0 } }),
+      call({ stage: 'verify', key: '104|verify|alpha|418|1|j2', requestedModel: 'j2', usage: { prompt_tokens: 1000, completion_tokens: 0 } }),
+    ];
+    const both = summarize({ lines: priced, catalog: edited, scores: noScores, cacheRuleApplies: false });
+    expect(both.map((r) => [r.productionUsd, r.judgeUsd])).toEqual([
+      [(1000 * 1 + 100 * 2) / 1e6 + 1000 / 1e6, 1000 / 1e6],
+      [(1000 * 1 + 100 * 2) / 1e6 + 2000 / 1e6, 2000 / 1e6],
+    ]);
+  });
+
+  it('has no production price for a usage with no tokens', () => {
+    const [row] = summarize({ lines: [run({}), call({ usage: {} })], catalog, scores: noScores, cacheRuleApplies: false });
+    expect(row.productionUsd).toBe(null);
+  });
+
+  it('makes no row of the expected failure of batch 0', () => {
+    const probe = run({ label: 'base', batch: 0, mode: 'verify', verifyModel: 'gpt-5.5', key: '0|verify|base|688|1|gpt-5.5', pr: '688', exit: 5, error: 'HTTP 400', expectFailure: true });
+    const find = run({ label: 'base', batch: 0, key: '0|find|base|895|1', pr: '895' });
+    const [row] = summarize({ lines: [find, probe], catalog, scores: noScores, cacheRuleApplies: false });
+    expect([row.judge, row.brokenCalls]).toEqual([null, 0]);
+  });
+});
+
+describe('summarize: what breaks a pair', () => {
+  const brokenOf = (lines) => rowOf(summarize({ lines, catalog, scores: noScores, cacheRuleApplies: false }), 'alpha').brokenCalls;
+
+  it('counts a run that failed with content and stop', () => {
+    expect(brokenOf([call({}), run({ exit: 5, error: 'the answer did not parse' })])).toBe(1);
+  });
+
+  it('counts a broken call and its failed run once', () => {
+    expect(brokenOf([call({ contentLength: 0 }), run({ exit: 5, error: 'empty' })])).toBe(1);
+  });
+
+  it('counts each failed attempt', () => {
+    const attempt2 = { attempt: 2 };
+    expect(brokenOf([call({ contentLength: 0 }), run({ exit: 5, error: 'empty' }), call({ ...attempt2 }), run({ ...attempt2, exit: 5, error: 'no parse' })])).toBe(2);
+  });
+
+  it('leaves out a failed run marked as expected', () => {
+    expect(brokenOf([run({ exit: 5, error: 'HTTP 400', expectFailure: true })])).toBe(0);
+  });
+
+  it('counts a batch 104 call on the row of its judge only', () => {
+    const judged = (judge) => run({ batch: 104, mode: 'verify', verifyModel: judge, key: `104|verify|alpha|418|1|${judge}` });
+    const lines = [judged('j1'), judged('j2'), call({ stage: 'verify', key: '104|verify|alpha|418|1|j1', requestedModel: 'j1', contentLength: 0 })];
+    expect(summarize({ lines, catalog, scores: noScores, cacheRuleApplies: false }).map((r) => r.brokenCalls)).toEqual([1, 0]);
+  });
+
+  it('counts a failed run of the judge on its own row only', () => {
+    const judged = (judge, over) => run({ batch: 7, mode: 'verify', verifyModel: judge, key: `7|verify|alpha|418|1|${judge}`, ...over });
+    const lines = [judged('j1', { exit: 5, error: 'boom' }), judged('j2', {})];
+    expect(summarize({ lines, catalog, scores: noScores, cacheRuleApplies: false }).map((r) => r.brokenCalls)).toEqual([1, 0]);
+  });
+
+  it('counts a failed find on every row of the finder', () => {
+    const judged = (judge) => run({ batch: 7, mode: 'verify', verifyModel: judge, key: `7|verify|alpha|418|1|${judge}` });
+    const lines = [run({ exit: 5, error: 'no parse' }), judged('j1'), judged('j2')];
+    expect(summarize({ lines, catalog, scores: noScores, cacheRuleApplies: false }).map((r) => r.brokenCalls)).toEqual([1, 1]);
+  });
+});
+
+describe('summarize: the concrete misses', () => {
+  const lines = [run({ draw: 1 }), run({ draw: 2 }), run({ batch: 7, mode: 'verify', verifyModel: 'j', key: '7|verify|alpha|418|1|j' })];
+  const scores = { batches: { 2: { alpha: { 1: score(['D2']), 2: score(['D1']) } }, 7: { alpha: { 1: score(['D2']) } } }, judges: {} };
+  const row = rowOf(summarize({ lines, catalog, scores, cacheRuleApplies: false }), 'alpha');
+
+  it('names the defects of the find stage and those it missed', () => {
+    expect([row.findDefects, row.missedFind]).toEqual([['D1', 'D2'], ['D3', 'D4', 'D5']]);
+  });
+
+  it('names the published union and what it missed', () => {
+    expect([row.publishedDefects, row.missedPublished]).toEqual([['D2'], ['D1', 'D3', 'D4', 'D5']]);
+  });
+
+  it('has no misses to name before anything is scored', () => {
+    const [bare] = summarize({ lines: [run({})], catalog, scores: noScores, cacheRuleApplies: false });
+    expect([bare.findDefects, bare.missedFind, bare.publishedDefects, bare.missedPublished]).toEqual([[], null, [], null]);
+  });
+});
+
+describe('anthropicCalls', () => {
+  it('takes the calls of the Anthropic models, not the gpt-5.5 verify of a Claude finder', () => {
+    const find = call({ key: '2|find|beta|418|1', requestedModel: 'beta-1' });
+    const judge = call({ stage: 'verify', key: '7|verify|beta|418|1|gpt-5.5', requestedModel: 'gpt-5.5' });
+    const other = call({});
+    expect(anthropicCalls([find, judge, other], catalog)).toEqual([find]);
+  });
+});
+
+describe('executorVisibility', () => {
+  it('counts the calls that name their host, and the hosts', () => {
+    const calls = [call({ provider: 'Alibaba' }), call({ provider: null }), call({ provider: 'Alibaba' }), call({ provider: 'Azure' })];
+    expect(executorVisibility(calls)).toEqual({ calls: 4, visible: 3, hosts: ['Alibaba', 'Azure'] });
+  });
+});
+
+describe('readsPerWrite', () => {
+  const details = (cached, written) => call({ usage: { prompt_tokens: 1000, completion_tokens: 1, prompt_tokens_details: { cached_tokens: cached, cache_write_tokens: written } } });
+
+  it('divides the tokens read by the tokens written', () => {
+    expect(readsPerWrite([details(0, 1000), details(250, 0), details(250, 1000)])).toEqual({ reads: 500, writes: 2000, ratio: 0.25 });
+  });
+
+  it('has no ratio with nothing written', () => {
+    expect(readsPerWrite([details(10, 0), call({ usage: null })])).toEqual({ reads: 10, writes: 0, ratio: null });
+  });
+});
+
+describe('baselineRowOf', () => {
+  const judged = (judge) => run({ label: 'base', batch: 104, mode: 'verify', verifyModel: judge, key: `104|verify|base|418|1|${judge}` });
+
+  it('takes the baseline pair among the rows of the baseline label', () => {
+    const rows = summarize({ lines: [judged('other'), judged('gpt-5.5')], catalog, scores: noScores, cacheRuleApplies: false });
+    expect(baselineRowOf(rows, catalog).judge).toBe('gpt-5.5');
+  });
+
+  it('takes the row with no judge before the baseline has one', () => {
+    const rows = summarize({ lines: [run({ label: 'base', key: '1|find|base|418|1' })], catalog, scores: noScores, cacheRuleApplies: false });
+    expect(baselineRowOf(rows, catalog).judge).toBe(null);
+  });
+
+  it('is undefined with no baseline row', () => {
+    expect(baselineRowOf([], catalog)).toBe(undefined);
+  });
+});
+
+describe('paidByRoute with a bad manual line', () => {
+  it('stays a number', () => {
+    expect(paidByRoute([{ type: 'manual', reason: 'no sum' }, { type: 'manual', usd: 1 }], catalog)).toEqual({ byRoute: {}, manualUsd: 1 });
+  });
+});
+
+describe('stage2Items', () => {
+  const priced = {
+    baseline: { label: 'base', findModel: 'base-find', verifyModel: 'base-judge', route: 'openai' },
+    candidates: [
+      { label: 'router', model: 'v/router', route: 'openrouter', only: null, tier: 'cheap', price: { input: 1, output: 0 } },
+      { label: 'claude', model: 'claude-1', route: 'anthropic', only: null, tier: 'mid', price: { input: 2, output: 30 } },
+      { label: 'sonnet', model: 'claude-sonnet-5-5', route: 'anthropic', only: null, tier: 'mid', price: { input: 2, output: 30 } },
+      { label: 'sol', model: 'gpt-6.1-sol', route: 'openai', only: null, tier: 'mid', price: { input: 1, output: 30 } },
+      { label: 'terra', model: 'gpt-6.1-terra', route: 'openai', only: null, tier: 'mid', price: { input: 1, output: 30 } },
+      { label: 'haiku', model: 'claude-haiku-5-5', route: 'anthropic', only: null, tier: 'cheap', price: { input: 1, output: 30 } },
+    ],
+    judges: [{ model: 'openai/gpt-5.5', only: null, price: { input: 5, output: 30 } }],
+    prices: { 'base-find': { input: 1, output: 0 }, 'base-judge': { input: 1, output: 30 }, 'gpt-5.5': { input: 5, output: 30 } },
+    prs: { 344: { head: null, input: 1000000, output: 0 }, 418: { head: 'h', input: 1000000, output: 0 }, 930: { head: 'h', input: 1000000, output: 0 } },
+    corpus: ['344'],
+    recallPrs: ['418', '930'],
+  };
+  // With these sizes a find costs its model's input price, and every judge at output 30 costs 0.19.
+  it('lists the items of the spec in order, priced from the plan', () => {
+    const items = stage2Items({ catalog: priced, corpus: ['344'], finalists: ['router', 'claude'], pairs: ['claude', 'sol'] });
+    expect(items.map((i) => [i.item, i.what, Number(i.usd.toFixed(4))])).toEqual([
+      [1, '#930: the baseline and router, claude, 3 draws each', 3 * 1.19 + 3 * 1.19 + 3 * 2.19],
+      [2, 'corpus: the baseline', 1.19],
+      [3, 'corpus: router', 1.19],
+      [3, 'corpus: claude', 2.19],
+      [4, 'judges on the same inputs: claude-sonnet-5-5, gpt-6.1-sol, gpt-6.1-terra, claude-haiku-5-5, on the baseline and router, claude; verify-corpus comes on top', 12 * 0.19],
+      [5, 'generic prompts: the baseline on #418 and the corpus', 4 * 1.19],
+      [6, 'a pair inside one provider, #418 x 3: claude', 3 * 2.19],
+      [6, 'a pair inside one provider, #418 x 3: sol', 3 * 1.19],
+    ].map(([item, what, usd]) => [item, what, Number(usd.toFixed(4))]));
+  });
+
+  it('prices the items with no finalist yet', () => {
+    const bare = stage2Items({ catalog: priced, corpus: ['344'], finalists: [], pairs: [] });
+    expect(bare.map((i) => i.item)).toEqual([1, 2, 4, 5]);
   });
 });
 

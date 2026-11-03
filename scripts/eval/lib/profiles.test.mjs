@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { admitted, pickProfiles } from './profiles.mjs';
+import { admitted, pickProfiles, proposeFinalists } from './profiles.mjs';
 
 const row = (over) => ({
   label: 'x',
   route: 'openai',
+  tier: 'mid',
+  judge: 'gpt-5.5',
+  judgeUsd: 0.2,
   pair: 'x + gpt-5.5',
+  findDefects: ['D1', 'D2', 'D3'],
+  publishedDefects: ['D1', 'D2', 'D3'],
   draws: 3,
   perDraw: [3, 3, 3],
   medianKnown: 3,
@@ -126,6 +131,111 @@ describe('preliminary cells and empty routes', () => {
   it('says so when nobody on the route reaches best value', () => {
     const low = row({ label: 'low', route: 'openrouter', medianPublished: 2 });
     expect(pickProfiles([low], baseline).value.openrouter).toEqual({ row: null, preliminary: false, note: 'nobody reaches 3 on #418 and 1 on #930' });
+  });
+});
+
+describe('a row with no judge', () => {
+  const none = row({ label: 'none', route: 'anthropic', judgeUsd: 0.5 });
+
+  it('ranks with the baseline judge cost added', () => {
+    const rows = [row({ label: 'alone', judge: null, judgeUsd: null, productionUsd: 0.1 }), row({ label: 'paired', productionUsd: 0.4 })];
+    expect(pickProfiles(rows, none).value.openai.row.label).toBe('paired');
+  });
+
+  it('wins when it stays cheaper with that cost added, and says the cost is estimated', () => {
+    const alone = row({ label: 'alone', judge: null, judgeUsd: null, productionUsd: 0.1 });
+    const cell = pickProfiles([alone, row({ label: 'paired', productionUsd: 0.7 })], none).value.openai;
+    expect([cell.row.label, cell.note]).toEqual(['alone', 'judge cost estimated at $0.50 from the baseline']);
+  });
+
+  it('keeps its productionUsd', () => {
+    const alone = row({ label: 'alone', judge: null, judgeUsd: null, productionUsd: 0.1 });
+    expect(pickProfiles([alone], none).value.openai.row.productionUsd).toBe(0.1);
+  });
+
+  it('says so when the baseline has no measured judge cost yet', () => {
+    const alone = row({ label: 'alone', judge: null, judgeUsd: null, productionUsd: 0.1 });
+    const cell = pickProfiles([alone], row({ label: 'none', route: 'anthropic', judgeUsd: null })).value.openai;
+    expect(cell.note).toBe('no judge cost in the price yet');
+  });
+});
+
+describe('who leaves the pool', () => {
+  const none = row({ label: 'none', route: 'anthropic' });
+
+  it('keeps an expensive row out of balanced', () => {
+    const rows = [row({ label: 'dear', tier: 'expensive', medianPublished: 5, productionUsd: 0.1 }), row({ label: 'mid', medianPublished: 4, productionUsd: 1 })];
+    expect(pickProfiles(rows, none).balanced.openai.row.label).toBe('mid');
+  });
+
+  it('keeps an expensive row out of best value', () => {
+    const rows = [row({ label: 'dear', tier: 'expensive', productionUsd: 0.1 }), row({ label: 'mid', productionUsd: 1 })];
+    expect(pickProfiles(rows, none).value.openai.row.label).toBe('mid');
+  });
+
+  it('lets an expensive row lead best of the best', () => {
+    const rows = [row({ label: 'dear', tier: 'expensive', medianPublished: 5 }), row({ label: 'mid', medianPublished: 4 })];
+    expect(pickProfiles(rows, none).best.openai.row.label).toBe('dear');
+  });
+
+  it('leaves balanced empty when only the expensive tier is within one defect', () => {
+    const rows = [row({ label: 'dear', tier: 'expensive', medianPublished: 5 }), row({ label: 'far', medianPublished: 3 })];
+    expect(pickProfiles(rows, none).balanced.openai).toEqual({ row: null, preliminary: false, note: 'nobody outside the expensive tier is within one defect of the leader' });
+  });
+
+  it('takes out a row with two refuted per run from every profile', () => {
+    const rows = [row({ label: 'noisy', medianPublished: 5, refutedMean: 2 }), row({ label: 'quiet', medianPublished: 4, refutedMean: 1.5 })];
+    const picks = pickProfiles(rows, none);
+    expect([picks.best.openai.row.label, picks.balanced.openai.row.label, picks.value.openai.row.label]).toEqual(['quiet', 'quiet', 'quiet']);
+  });
+
+  it('keeps a row with no verify', () => {
+    const rows = [row({ label: 'unverified', medianPublished: 5, refutedMean: null })];
+    expect(pickProfiles(rows, none).best.openai.row.label).toBe('unverified');
+  });
+
+  it('says so when refuted emptied the route', () => {
+    expect(pickProfiles([row({ label: 'noisy', refutedMean: 3 })], none).best.openai).toEqual({ row: null, preliminary: false, note: 'every row on this route left the pool' });
+  });
+
+  it('never offers a dropped candidate', () => {
+    expect(pickProfiles([row({ label: 'gone', dropped: true })], none).best.openai).toEqual({ row: null, preliminary: false, note: 'every row on this route left the pool' });
+  });
+});
+
+describe('balanced names what it gives up', () => {
+  const none = row({ label: 'none', route: 'anthropic' });
+
+  it('names the defect lost against the leader and the saving per PR', () => {
+    const rows = [
+      row({ label: 'leader', medianPublished: 5, productionUsd: 0.5, publishedDefects: ['D1', 'D2', 'D3', 'D4', 'D5'] }),
+      row({ label: 'close', medianPublished: 4, productionUsd: 0.2, publishedDefects: ['D1', 'D2', 'D3', 'D4'] }),
+    ];
+    expect(pickProfiles(rows, none).balanced.openai.note).toBe('loses D5 against leader; saves $0.30 per PR');
+  });
+
+  it('says nothing when the leader is the cheapest', () => {
+    expect(pickProfiles([row({ label: 'leader' })], none).balanced.openai.note).toBe('');
+  });
+
+  it('says no defect is named when the unions match', () => {
+    const rows = [row({ label: 'leader', medianPublished: 5, productionUsd: 0.5 }), row({ label: 'close', medianPublished: 4, productionUsd: 0.2 })];
+    expect(pickProfiles(rows, none).balanced.openai.note).toBe('loses no named defect against leader; saves $0.30 per PR');
+  });
+});
+
+describe('the pairs of one finder', () => {
+  it('compares a pair with the baseline pair, not the baseline label', () => {
+    const other = row({ label: 'base', judge: 'cheap-judge', medianPublished: 5, medianRecall930: null });
+    const cell = pickProfiles([baseline, other], baseline).best.openai;
+    expect([cell.row.judge, cell.note]).toEqual(['gpt-5.5', 'the lead over the baseline is not confirmed on #930, so the baseline stays']);
+  });
+});
+
+describe('proposeFinalists', () => {
+  it('lists the labels leading any profile, without the baseline, once each', () => {
+    const rows = [baseline, row({ label: 'a', medianPublished: 5, medianRecall930: 3 }), row({ label: 'b', route: 'anthropic', medianPublished: 4 })];
+    expect(proposeFinalists(pickProfiles(rows, baseline), 'base')).toEqual(['a', 'b']);
   });
 });
 

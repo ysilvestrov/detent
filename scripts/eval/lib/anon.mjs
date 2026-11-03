@@ -40,11 +40,12 @@ const namesOf = (run) => [run.label, run.findModel, run.verifyModel].filter((n) 
 const mentionsOwnName = (run, findings) =>
   findings.some((f) => TEXT_FIELDS.some((field) => typeof f[field] === 'string' && namesOf(run).some((name) => f[field].includes(name))));
 
-/** Batches that hold more than one item per label and draw: batch 1 a find and a verify, batch 104 several judges. */
-const MULTI_ITEM_BATCHES = [1, 104];
+/** Batches that hold more than one item per label and draw: batch 1 a find and a verify, batches 104 and 106 several judges. */
+const MULTI_ITEM_BATCHES = [1, 104, 106];
 
-/** In those batches a verify is keyed as `label@verifyModel`, so the scores do not collide. */
-const keyLabel = (run) => (MULTI_ITEM_BATCHES.includes(run.batch) && run.mode === 'verify' && run.verifyModel ? `${run.label}@${run.verifyModel}` : run.label);
+/** In those batches a verify or whole run is keyed as `label@verifyModel`, so the scores do not collide. */
+const keyLabel = (run) =>
+  MULTI_ITEM_BATCHES.includes(run.batch) && (run.mode === 'verify' || run.mode === 'whole') && run.verifyModel ? `${run.label}@${run.verifyModel}` : run.label;
 
 /**
  * `runs` are `run` lines; `read(findingsFile)` returns the saved findings of a find.
