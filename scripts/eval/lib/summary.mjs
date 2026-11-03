@@ -16,8 +16,9 @@
 // A score counts only if a run of that batch, label, draw, PR and judge closed clean (`isScorable`).
 //
 // What belongs to whom: the find-stage fields belong to the finder and appear on each of its rows. Published scores,
-// `refutedMean`, `errorShare`, the corpus, the judge cost and the consensus belong to the pair. A finder with no judge
-// yet has one row with `judge: null`. `composite` is true only when the row's judge did not verify this finder.
+// `refutedMean`, `errorShare`, the judge cost and the consensus belong to the pair. So does the corpus when the pair ran it;
+// a pair with no corpus run takes the counts of its finder's pair that has one, and `corpusFrom` names that judge. A finder
+// with no judge yet has one row with `judge: null`. `composite` is true only when the row's judge did not verify this finder.
 import { planBatch } from './batches.mjs';
 import { priceOf } from './catalog.mjs';
 import { callUsd, isScorable } from './records.mjs';
@@ -298,8 +299,11 @@ export function summarize({ lines, catalog, scores, cacheRuleApplies }) {
     const judged = runs.filter((r) => isVerifying(r) && !r.expectFailure);
     const judges = [...new Set(judged.map(judgeOf).filter((judge) => judge !== null))];
     const finder = findStage({ entry, scores, closed });
+    const corpusRun = judges.find((judge) => corpusOf({ entry, judge, scores, closed }).prs > 0) ?? null;
 
     return (judges.length === 0 ? [null] : judges).map((judge) => {
+      const ownCorpus = corpusOf({ entry, judge, scores, closed });
+      const inherited = ownCorpus.prs === 0 && corpusRun !== null;
       const mine = judged.filter((r) => judgeOf(r) === judge);
       const pairCalls = calls.filter((c) => c.stage !== 'verify' || (judge !== null && c.requestedModel === judge));
       const pairRuns = runs.filter((r) => !isVerifying(r) || judgeOf(r) === judge);
@@ -332,7 +336,8 @@ export function summarize({ lines, catalog, scores, cacheRuleApplies }) {
         productionUsd: production,
         judgeUsd: judgePart,
         composite: !mine.some(isScorable),
-        corpus: corpusOf({ entry, judge, scores, closed }),
+        corpus: inherited ? corpusOf({ entry, judge: corpusRun, scores, closed }) : ownCorpus,
+        corpusFrom: inherited ? corpusRun : null,
         judgeConsensus: judge === null ? null : scores.judges?.[judge] ?? null,
         brokenCalls: brokenCount({ calls: pairCalls, runs: pairRuns }),
         medianRecall930: median(publishedOn('930').map((e) => e.value.defects.length)),

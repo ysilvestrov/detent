@@ -22,6 +22,7 @@ const row = (over) => ({
   composite: false,
   unstable: false,
   corpus: { real: 4, false: 0, unfalsifiable: 0, published: 4, prs: 5 },
+  corpusFrom: null,
   judgeConsensus: 15,
   brokenCalls: 0,
   medianRecall930: 2,
@@ -226,6 +227,14 @@ describe('balanced names what it gives up', () => {
   it('says no defect is named when the unions match', () => {
     const rows = [row({ label: 'leader', medianPublished: 5, productionUsd: 0.5 }), row({ label: 'close', medianPublished: 4, productionUsd: 0.2 })];
     expect(pickProfiles(rows, none).balanced.openai.note).toBe('loses no named defect against leader; saves $0.30 per PR');
+  });
+});
+
+describe('a pair with the corpus of its finder', () => {
+  it('is admitted on those counts, and the cell says whose they are', () => {
+    const inherited = row({ label: 'heir', route: 'anthropic', corpusFrom: 'other-judge' });
+    const cell = pickProfiles([inherited], baseline).best.anthropic;
+    expect([admitted(inherited).ok, cell.row.label, cell.preliminary, cell.note]).toEqual([true, 'heir', false, "corpus counts from the finder's run with other-judge"]);
   });
 });
 

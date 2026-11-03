@@ -36,6 +36,7 @@ function cellOf(row, pool, extra = '') {
   if (row.medianRecall930 === null) notes.push('no #930 yet');
   if (row.unstable) notes.push('unstable: the owner decides');
   if (row.composite) notes.push('composite pair');
+  if (row.corpusFrom !== null) notes.push(`corpus counts from the finder's run with ${row.corpusFrom}`);
   if (pool === 'unadmitted') notes.push('nobody on the route passed the admission');
   if (extra !== '') notes.push(extra);
   return { row, preliminary: !verdict.ok || row.medianRecall930 === null || row.medianPublished === null, note: notes.join('; ') };

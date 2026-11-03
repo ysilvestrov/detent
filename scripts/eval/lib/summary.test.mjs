@@ -433,6 +433,48 @@ describe('summarize: one row is one pair', () => {
   });
 });
 
+describe('summarize: a pair with no corpus run of its own', () => {
+  const judged = (batch, judge, pr = '418') => run({ batch, mode: batch === 104 ? 'verify' : 'whole', verifyModel: judge, pr, key: `${batch}|whole|alpha|${pr}|1|${judge}` });
+  const counts = { real: 2, false: 0, unfalsifiable: 0, published: 2 };
+  const ownCorpus = { real: 4, false: 0, unfalsifiable: 0, published: 4, prs: 2 };
+  const lines = [judged(104, 'j2'), judged(103, 'j1', '344'), judged(103, 'j1', '348'), judged(104, 'j3')];
+  const scores = { batches: { 103: { alpha: { 1: { corpus: { 344: counts, 348: counts } } } } }, judges: { j1: 15, j2: 14 } };
+  const rows = summarize({ lines, catalog, scores, cacheRuleApplies: false });
+
+  it('keeps the own counts of the pair that ran the corpus', () => {
+    const row = rows.find((r) => r.judge === 'j1');
+    expect([row.corpus, row.corpusFrom]).toEqual([ownCorpus, null]);
+  });
+
+  it('takes the finder counts on a pair with none, and says from which judge', () => {
+    const row = rows.find((r) => r.judge === 'j2');
+    expect([row.corpus, row.corpusFrom]).toEqual([ownCorpus, 'j1']);
+  });
+
+  it('keeps the consensus of its own judge', () => {
+    expect(rows.map((r) => [r.judge, r.judgeConsensus])).toEqual([['j2', 14], ['j1', 15], ['j3', null]]);
+  });
+
+  it('keeps composite true where the judge did not verify this finder', () => {
+    const failed = run({ batch: 7, mode: 'verify', verifyModel: 'j4', key: '7|verify|alpha|418|1|j4', exit: 5, error: 'boom' });
+    const row = summarize({ lines: [...lines, failed], catalog, scores, cacheRuleApplies: false }).find((r) => r.judge === 'j4');
+    expect([row.composite, row.corpusFrom, row.corpus]).toEqual([true, 'j1', ownCorpus]);
+  });
+
+  it('inherits nothing when no pair of the finder ran the corpus', () => {
+    const [row] = summarize({ lines: [judged(104, 'j2')], catalog, scores: noScores, cacheRuleApplies: false });
+    expect([row.corpus.prs, row.corpusFrom]).toEqual([0, null]);
+  });
+
+  it('keeps the generic-prompts row apart from the corpus of the baseline', () => {
+    const baseRun = (batch, judge, pr) => run({ label: 'base', batch, mode: 'whole', verifyModel: judge, pr, key: `${batch}|whole|base|${pr}|1|${judge}` });
+    const both = [baseRun(102, 'gpt-5.5', '344'), baseRun(105, 'gpt-5.5', '418')];
+    const baseScores = { batches: { 102: { base: { 1: { corpus: { 344: counts } } } } }, judges: {} };
+    const generic = rowOf(summarize({ lines: both, catalog, scores: baseScores, cacheRuleApplies: false }), 'base (generic prompts)');
+    expect([generic.corpus.prs, generic.corpusFrom]).toEqual([0, null]);
+  });
+});
+
 describe('summarize: what breaks a pair', () => {
   const brokenOf = (lines) => rowOf(summarize({ lines, catalog, scores: noScores, cacheRuleApplies: false }), 'alpha').brokenCalls;
 
