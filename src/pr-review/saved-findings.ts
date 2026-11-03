@@ -84,7 +84,8 @@ export function readFindings(path: string): SavedFindings {
   checkFields(parsed, where, [
     ['v', (v) => v === 1],
     ['pr', isStr],
-    ['head', isStr],
+    // Hex only: the head goes to `git fetch`, where a value like `--upload-pack=x` would be read as an option.
+    ['head', (v) => isStr(v) && /^[0-9a-f]+$/i.test(v)],
     ['base', isStr],
     ['findModel', isStr],
     ['scope', isStr],

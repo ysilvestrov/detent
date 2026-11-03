@@ -300,6 +300,50 @@ describe('callStructured: onResponse', () => {
     expect(hookCalls).toBe(1);
   });
 
+  const unreadable = (counter: { fetches: number }) =>
+    (async () => {
+      counter.fetches++;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new SyntaxError('Unexpected end of JSON input');
+        },
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+  const NULLS: CallInfo = { id: null, model: null, provider: null, finishReason: null, contentLength: 0, usage: null };
+
+  it('reports a body it cannot read to the hook and does not retry', async () => {
+    const seen: CallInfo[] = [];
+    const counter = { fetches: 0 };
+    const err = (await callStructured({ ...deps(unreadable(counter)), onResponse: (info) => seen.push(info) }, msgs, fmt).catch(
+      (e) => e,
+    )) as Error;
+    expect(err).toBeInstanceOf(NonRetryableError);
+    expect(counter.fetches).toBe(1);
+    expect(seen).toEqual([NULLS]);
+  });
+
+  it('treats a body of JSON null like a body it cannot read, when there is a hook', async () => {
+    const seen: CallInfo[] = [];
+    let fetches = 0;
+    const fetchFn = (async () => {
+      fetches++;
+      return { ok: true, status: 200, json: async () => null } as unknown as Response;
+    }) as unknown as typeof fetch;
+    const err = (await callStructured({ ...deps(fetchFn), onResponse: (info) => seen.push(info) }, msgs, fmt).catch((e) => e)) as Error;
+    expect(err).toBeInstanceOf(NonRetryableError);
+    expect(fetches).toBe(1);
+    expect(seen).toEqual([NULLS]);
+  });
+
+  it('keeps retrying a body it cannot read when there is no hook', async () => {
+    const counter = { fetches: 0 };
+    const err = (await callStructured(deps(unreadable(counter)), msgs, fmt).catch((e) => e)) as Error;
+    expect(err.message).toContain('request failed after 3 attempts');
+    expect(counter.fetches).toBe(3);
+  });
+
   it('gives null for the fields a response leaves out', async () => {
     const seen: CallInfo[] = [];
     const fetchFn = respond({ choices: [{ message: { content: 'a' } }] });

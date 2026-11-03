@@ -64,6 +64,10 @@ describe('saved findings', () => {
     expect(() => readChanged({ kept: [withoutLine] })).toThrow('kept[0]: field "matchedLine"');
   });
 
+  it('names head when it is not a commit sha', () => {
+    expect(() => readChanged({ head: '--upload-pack=x' })).toThrow('field "head"');
+  });
+
   it('names the file when it is not JSON', () => {
     const path = tempFile();
     writeFileSync(path, '{not json');

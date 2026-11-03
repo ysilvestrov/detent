@@ -3,15 +3,35 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { CallInfo } from './openai.js';
 import { runReplay, type ReplayArgs, type ReplayIo } from './replay.js';
 import { readFindings } from './saved-findings.js';
 import { loadSettings } from './settings.js';
 
 const KEY = 'sk-test-key-0123456789';
 
+// A switch the tests flip to make the record file refuse a stage's call line, the way a full disk would.
+const faults = vi.hoisted(() => ({ failWritesOf: null as string | null }));
+vi.mock('./record.js', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./record.js')>();
+  return {
+    ...real,
+    openRecord: (path: string, runId: string) => {
+      const writer = real.openRecord(path, runId);
+      return {
+        ...writer,
+        call: (stage: 'find' | 'verify', info: CallInfo) => {
+          if (stage === faults.failWritesOf) throw new Error('disk full');
+          writer.call(stage, info);
+        },
+      };
+    },
+  };
+});
+
 // The folders are left behind on purpose: nothing in this repository deletes recursively.
-export function makeRepo(): { cwd: string; head: string } {
+function makeRepo(): { cwd: string; head: string } {
   const cwd = mkdtempSync(join(tmpdir(), 'detent-replay-'));
   const git = (...args: string[]): string =>
     execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8' }).trim();
@@ -25,7 +45,7 @@ export function makeRepo(): { cwd: string; head: string } {
   return { cwd, head: git('rev-parse', 'HEAD') };
 }
 
-export function stubGh(head: string): (args: string[]) => string {
+function stubGh(head: string): (args: string[]) => string {
   return () => JSON.stringify({ title: 't', body: '', headRefOid: head, baseRefName: 'main' });
 }
 
@@ -54,7 +74,7 @@ const FINDING = {
 };
 
 /** Answers each stage with one finding quoting `const x = 1;` and a `confirmed` verdict. `override` replaces a stage's reply. */
-export function makeFetch(override: Partial<Record<Stage, () => Response>> = {}): {
+function makeFetch(override: Partial<Record<Stage, () => Response>> = {}): {
   fetchFn: typeof fetch;
   bodies: string[];
 } {
@@ -77,10 +97,10 @@ export function makeFetch(override: Partial<Record<Stage, () => Response>> = {})
 }
 
 /** One `runReplay` over a fresh repository; everything the command printed comes back with its exit code. */
-export async function replay(
+async function replay(
   args: Omit<ReplayArgs, 'pr'>,
   p: { env?: ReplayIo['env']; fetchFn: typeof fetch },
-): Promise<{ code: number; out: string[]; err: string[] }> {
+): Promise<{ code: number; out: string[]; err: string[]; head: string }> {
   const { cwd, head } = makeRepo();
   const out: string[] = [];
   const err: string[] = [];
@@ -88,16 +108,50 @@ export async function replay(
     { pr: '1', ...args },
     { cwd, env: p.env ?? { OPENAI_API_KEY: KEY }, out: (l) => out.push(l), err: (l) => err.push(l), fetchFn: p.fetchFn, gh: stubGh(head) },
   );
-  return { code, out, err };
+  return { code, out, err, head };
 }
 
-export const recordPath = (name = 'r.jsonl'): string => join(mkdtempSync(join(tmpdir(), 'detent-record-')), name);
+const recordPath = (name = 'r.jsonl'): string => join(mkdtempSync(join(tmpdir(), 'detent-record-')), name);
 
-export function readRecord(path: string): Array<Record<string, any>> {
+function readRecord(path: string): Array<Record<string, any>> {
   return readFileSync(path, 'utf8')
     .split('\n')
     .filter(Boolean)
     .map((l) => JSON.parse(l) as Record<string, any>);
+}
+
+type Result = { code: number; out: string[]; err: string[] };
+type Run = (args: Omit<ReplayArgs, 'pr'> & { pr?: string }, p: { env?: ReplayIo['env']; fetchFn: typeof fetch }) => Promise<Result>;
+
+/** A repository whose first commit holds a.ts and whose second commit writes the files of `change`. */
+function repoWith(change: Record<string, string>): { cwd: string; head: string } {
+  const cwd = mkdtempSync(join(tmpdir(), 'detent-replay-'));
+  const git = (...args: string[]): string =>
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8' }).trim();
+  git('init', '-q', '-b', 'main');
+  writeFileSync(join(cwd, 'a.ts'), 'export const a = 0;\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'first');
+  git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+  for (const [path, content] of Object.entries(change)) writeFileSync(join(cwd, path), content);
+  git('add', '.');
+  git('commit', '-q', '-m', 'second');
+  return { cwd, head: git('rev-parse', 'HEAD') };
+}
+
+/** Several runs over one repository: the head must be the same for a find and the verify that follows it. */
+function inRepo(change?: Record<string, string>): { cwd: string; head: string; run: Run } {
+  const { cwd, head } = change ? repoWith(change) : makeRepo();
+  const run: Run = async (args, p) => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = await runReplay(
+      { pr: '418', ...args },
+      { cwd, env: p.env ?? { OPENAI_API_KEY: KEY }, out: (l) => out.push(l), err: (l) => err.push(l), fetchFn: p.fetchFn, gh: stubGh(head) },
+    );
+    return { code, out, err };
+  };
+  return { cwd, head, run };
 }
 
 describe('replay --record', () => {
@@ -152,11 +206,12 @@ describe('replay --record', () => {
     const path = recordPath();
     const { fetchFn } = makeFetch({ review_findings: () => completion('') });
 
-    await expect(replay({ record: path }, { fetchFn })).rejects.toThrow('OpenAI returned an empty completion');
+    const repo = inRepo();
+    await expect(repo.run({ record: path }, { fetchFn })).rejects.toThrow('OpenAI returned an empty completion');
 
     const lines = readRecord(path);
     expect(lines.map((l) => l.type)).toEqual(['call', 'run']);
-    expect(lines[1]).toMatchObject({ exit: 5, error: 'OpenAI returned an empty completion', head: expect.any(String) });
+    expect(lines[1]).toMatchObject({ exit: 5, error: 'OpenAI returned an empty completion', head: repo.head });
   });
 
   it('replaces the key in the recorded error', async () => {
@@ -219,6 +274,7 @@ describe('replay executor pinning', () => {
       AI_REVIEW_OPENROUTER_ONLY: 'moonshotai',
       AI_REVIEW_VERIFY_OPENROUTER_ONLY: 'openai, azure',
       AI_REVIEW_CACHE: 'off',
+      AI_REVIEW_CACHE_OFF_MODELS: 'f/model,v/model',
     };
     const { code } = await replay({ record: path }, { fetchFn, env });
 
@@ -266,24 +322,6 @@ describe('replay find and verify as separate steps', () => {
         return null;
       }
     }).scope;
-  type Result = { code: number; out: string[]; err: string[] };
-  type Run = (args: Omit<ReplayArgs, 'pr'> & { pr?: string }, p: { env?: ReplayIo['env']; fetchFn: typeof fetch }) => Promise<Result>;
-
-  /** Several runs over one repository: the head must be the same for a find and the verify that follows it. */
-  function inRepo(): { cwd: string; head: string; run: Run } {
-    const { cwd, head } = makeRepo();
-    const run: Run = async (args, p) => {
-      const out: string[] = [];
-      const err: string[] = [];
-      const code = await runReplay(
-        { pr: '418', ...args },
-        { cwd, env: p.env ?? { OPENAI_API_KEY: KEY }, out: (l) => out.push(l), err: (l) => err.push(l), fetchFn: p.fetchFn, gh: stubGh(head) },
-      );
-      return { code, out, err };
-    };
-    return { cwd, head, run };
-  }
-
   it('find-only makes one call and saves what passed the gate', async () => {
     const repo = inRepo();
     const path = tempFile();
@@ -318,7 +356,8 @@ describe('replay find and verify as separate steps', () => {
     const { out } = await replay({ findOnly: true, saveFindings: tempFile(), record }, { fetchFn, env: OPENROUTER });
 
     const lines = readRecord(record);
-    expect(lines.map((l) => (l.type === 'call' ? `call:${l.stage}` : l.type))).toEqual(['call:find', 'run']);
+    expect(lines.map((l) => l.type)).toEqual(['call', 'run']);
+    expect(lines.filter((l) => l.type === 'call').map((l) => l.stage)).toEqual(['find']);
     expect(lines[1]).toMatchObject({ findModel: 'f/model', verifyModel: null, results: [], raised: 1, gated: 1 });
     expect(out.join('\n')).not.toContain('v/model');
   });
@@ -410,7 +449,8 @@ describe('replay find and verify as separate steps', () => {
     const lines = readRecord(record);
     const saved = readFindings(path);
     expect(code).toBe(0);
-    expect(lines.map((l) => (l.type === 'call' ? `call:${l.stage}` : l.type))).toEqual(['call:verify', 'run']);
+    expect(lines.map((l) => l.type)).toEqual(['call', 'run']);
+    expect(lines.filter((l) => l.type === 'call').map((l) => l.stage)).toEqual(['verify']);
     expect(lines[1]).toMatchObject({
       exit: 0,
       findModel: 'f/model',
@@ -424,5 +464,173 @@ describe('replay find and verify as separate steps', () => {
       diffOnly: [],
     });
     expect(lines[1]!.results[0]).toMatchObject({ file: 'a.ts', line: 2, verdict: 'confirmed' });
+  });
+});
+
+describe('replay run line, failures and edge cases', () => {
+  const OPENROUTER = { OPENROUTER_API_KEY: KEY, AI_REVIEW_MODEL: 'f/model', AI_REVIEW_VERIFY_MODEL: 'v/model' };
+  const bodyOf = (raw: string): Record<string, any> => JSON.parse(raw) as Record<string, any>;
+  const tempFile = (): string => join(mkdtempSync(join(tmpdir(), 'detent-findings-')), 'f.json');
+  const STANDARD_KEYS = ['model', 'max_completion_tokens', 'response_format', 'messages'];
+  const TWO_FILES = { 'a.ts': 'export const a = 0;\nconst x = 1;\n', 'b.ts': 'export const b = 0;\nconst y = 2;\n' };
+  const twoFindings = (): Response =>
+    completion(JSON.stringify({ findings: [FINDING, { ...FINDING, file: 'b.ts', quote: 'const y = 2;', claim: 'y is a constant' }] }));
+
+  it('a failed record write in the verify stage stops the paid calls and ends the run with exit 5', async () => {
+    const repo = inRepo(TWO_FILES);
+    const path = recordPath();
+    const { fetchFn, bodies } = makeFetch({ review_findings: twoFindings });
+    faults.failWritesOf = 'verify';
+    try {
+      await expect(repo.run({ record: path }, { fetchFn })).rejects.toThrow('disk full');
+    } finally {
+      faults.failWritesOf = null;
+    }
+
+    const lines = readRecord(path);
+    expect(bodies.map((b) => bodyOf(b).response_format.json_schema.name)).toEqual(['review_findings', 'review_verdicts']);
+    expect(lines.map((l) => l.type)).toEqual(['call', 'run']);
+    expect(lines[1]).toMatchObject({ exit: 5, error: expect.stringContaining('disk full') });
+  });
+
+  it('a verify that fails for every finding exits 0 and says so on the run line and on stderr', async () => {
+    const repo = inRepo(TWO_FILES);
+    const path = recordPath();
+    const { fetchFn } = makeFetch({ review_findings: twoFindings, review_verdicts: () => new Response('bad', { status: 400 }) });
+    const { code, err } = await repo.run({ record: path }, { fetchFn });
+
+    expect(code).toBe(0);
+    expect(err).toContain('2 of 2 findings not verified');
+    expect(readRecord(path).at(-1)).toMatchObject({ exit: 0, error: '2 of 2 findings not verified' });
+  });
+
+  it('a verify that fails for one of two files counts only that finding', async () => {
+    const repo = inRepo(TWO_FILES);
+    const path = recordPath();
+    let verdictCalls = 0;
+    const { fetchFn } = makeFetch({
+      review_findings: twoFindings,
+      review_verdicts: () => {
+        verdictCalls++;
+        return verdictCalls === 1
+          ? new Response('bad', { status: 400 })
+          : completion(JSON.stringify({ verdicts: [{ index: 1, verdict: 'confirmed', evidence: 'there' }] }));
+      },
+    });
+    const { code } = await repo.run({ record: path }, { fetchFn });
+
+    expect(code).toBe(0);
+    expect(readRecord(path).at(-1)).toMatchObject({ error: '1 of 2 findings not verified' });
+  });
+
+  it('a verify without failures leaves the error of the run line null', async () => {
+    const path = recordPath();
+    const { fetchFn } = makeFetch();
+    await replay({ record: path }, { fetchFn });
+
+    expect(readRecord(path).at(-1)).toMatchObject({ error: null });
+  });
+
+  it('verify-from with a find pin on a provider that is not openrouter exits 0 and records no find pin', async () => {
+    const repo = inRepo();
+    const saved = tempFile();
+    await repo.run({ findOnly: true, saveFindings: saved }, { fetchFn: makeFetch().fetchFn });
+    const path = recordPath();
+    const { code } = await repo.run(
+      { verifyFrom: saved, record: path },
+      { fetchFn: makeFetch().fetchFn, env: { OPENAI_API_KEY: KEY, AI_REVIEW_OPENROUTER_ONLY: 'x' } },
+    );
+
+    expect(code).toBe(0);
+    expect(readRecord(path).at(-1)).toMatchObject({ only: { find: null, verify: null } });
+  });
+
+  it('find-only with a verify pin on a provider that is not openrouter exits 0 and records no verify pin', async () => {
+    const path = recordPath();
+    const { code } = await replay(
+      { findOnly: true, saveFindings: tempFile(), record: path },
+      { fetchFn: makeFetch().fetchFn, env: { OPENAI_API_KEY: KEY, AI_REVIEW_VERIFY_OPENROUTER_ONLY: 'x' } },
+    );
+
+    expect(code).toBe(0);
+    expect(readRecord(path).at(-1)).toMatchObject({ only: { find: null, verify: null } });
+  });
+
+  it.each([
+    ['a list that does not name the model', { AI_REVIEW_CACHE: 'off', AI_REVIEW_CACHE_OFF_MODELS: 'other/model' }],
+    ['no list', { AI_REVIEW_CACHE: 'off' }],
+  ])('cache off with %s sends the standard body and records the default cache mode', async (_name, extra) => {
+    const path = recordPath();
+    const { fetchFn, bodies } = makeFetch();
+    await replay({ record: path }, { fetchFn, env: { ...OPENROUTER, ...extra } });
+
+    expect(bodies.map((b) => Object.keys(bodyOf(b)).slice(0, 4))).toEqual([STANDARD_KEYS, STANDARD_KEYS]);
+    expect(readRecord(path).at(-1)).toMatchObject({ cacheMode: 'default' });
+  });
+
+  it('cache off for the find model only turns it off in the find body and records off', async () => {
+    const path = recordPath();
+    const { fetchFn, bodies } = makeFetch();
+    await replay({ record: path }, { fetchFn, env: { ...OPENROUTER, AI_REVIEW_CACHE: 'off', AI_REVIEW_CACHE_OFF_MODELS: 'f/model' } });
+
+    expect(bodyOf(bodies[0]!).prompt_cache_options).toEqual({ mode: 'explicit' });
+    expect(bodyOf(bodies[1]!)).not.toHaveProperty('prompt_cache_options');
+    expect(readRecord(path).at(-1)).toMatchObject({ cacheMode: 'off' });
+  });
+
+  it('find-only with no reviewable files saves empty findings that verify-from accepts without a call', async () => {
+    const repo = inRepo({ 'README.md': '# hi\n' });
+    const saved = tempFile();
+    const first = makeFetch();
+    const found = await repo.run({ findOnly: true, saveFindings: saved }, { fetchFn: first.fetchFn });
+
+    expect(found.code).toBe(0);
+    expect(first.bodies).toEqual([]);
+    expect(readFindings(saved)).toMatchObject({ head: repo.head, raised: [], kept: [], dropped: [] });
+
+    const second = makeFetch();
+    const verified = await repo.run({ verifyFrom: saved }, { fetchFn: second.fetchFn });
+    expect(verified.code).toBe(0);
+    expect(second.bodies).toEqual([]);
+  });
+
+  it('records a run line with empty arrays when no file is reviewable', async () => {
+    const repo = inRepo({ 'README.md': '# hi\n' });
+    const path = recordPath();
+    const { code, out } = await repo.run({ record: path }, { fetchFn: makeFetch().fetchFn });
+
+    expect(code).toBe(0);
+    expect(out).toEqual(['no reviewable files']);
+    expect(readRecord(path)).toMatchObject([{ type: 'run', exit: 0, error: null, head: repo.head, raised: 0, gated: 0, dropped: [], results: [], diffOnly: [] }]);
+  });
+
+  it('verify-from never asks gh', async () => {
+    const repo = inRepo();
+    const saved = tempFile();
+    await repo.run({ findOnly: true, saveFindings: saved }, { fetchFn: makeFetch().fetchFn });
+    const code = await runReplay(
+      { pr: '418', verifyFrom: saved },
+      {
+        cwd: repo.cwd,
+        env: { OPENAI_API_KEY: KEY },
+        out: () => {},
+        err: () => {},
+        fetchFn: makeFetch().fetchFn,
+        gh: () => {
+          throw new Error('gh was called');
+        },
+      },
+    );
+
+    expect(code).toBe(0);
+  });
+
+  it('a file sent as a diff only reaches the printed line and the run line', async () => {
+    const repo = inRepo({ 'a.ts': 'export const a = 0;\nconst x = 1;\n', 'x.test.ts': 'export const t = 1;\n' });
+    const path = recordPath();
+    const { out } = await repo.run({ record: path }, { fetchFn: makeFetch().fetchFn });
+
+    expect(out).toContain('Context budget: 1 file(s) sent as diff only: x.test.ts');
+    expect(readRecord(path).at(-1)).toMatchObject({ diffOnly: ['x.test.ts'] });
   });
 });

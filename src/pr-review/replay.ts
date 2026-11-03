@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { buildReviewContext } from './context.js';
 import { runFind } from './find.js';
 import { applyGate, changedLineRanges } from './gate.js';
-import type { OpenAiDeps } from './openai.js';
+import { NonRetryableError, type OpenAiDeps } from './openai.js';
 import { PROVIDER_IDS, isProviderId, resolveModels, selectProvider, type Provider, type ProviderId } from './providers.js';
 import { openRecord, type RecordWriter, type RunLine } from './record.js';
 import { contextReader, filterReviewableFiles } from './review.js';
@@ -202,10 +202,20 @@ const modelFromEnv = (env: Env, name: string): string | undefined => {
   return value === undefined || value === '' ? undefined : value;
 };
 
-/** The comma-separated names in a pin variable. Null when it is unset or blank. */
+/** The names in a comma-separated variable; none when it is unset or blank. */
+function splitList(raw: string | undefined): string[] {
+  return (raw ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+/** The names in a pin variable. Null when it is unset or blank. */
 function parsePin(raw: string | undefined): string[] | null {
-  const names = (raw ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const names = splitList(raw);
   return names.length === 0 ? null : names;
+}
+
+/** Whether a request to this model carries the switch that turns cache writes off. */
+function cacheWritesOff(p: { model: string; cacheOff: boolean; cacheOffModels: string | undefined }): boolean {
+  return p.cacheOff && splitList(p.cacheOffModels).includes(p.model);
 }
 
 /**
@@ -221,8 +231,7 @@ export function stageExtraBody(p: {
   cacheOffModels: string | undefined;
 }): Record<string, unknown> | undefined {
   const only = parsePin(p.only);
-  const offModels = (p.cacheOffModels ?? '').split(',').map((s) => s.trim());
-  const cacheOff = p.cacheOff && offModels.includes(p.model);
+  const cacheOff = cacheWritesOff(p);
   if (only === null && !cacheOff) return p.provider.extraBody;
   const body: Record<string, unknown> = { ...p.provider.extraBody };
   if (only !== null) {
@@ -281,6 +290,14 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
     }
   }
 
+  // The stages this run calls a model for.
+  const runsFind = args.verifyFrom === undefined && !args.contextOnly;
+  const runsVerify = !args.findOnly && !args.contextOnly;
+  const pins = {
+    find: runsFind ? parsePin(io.env.AI_REVIEW_OPENROUTER_ONLY) : null,
+    verify: runsVerify ? parsePin(io.env.AI_REVIEW_VERIFY_OPENROUTER_ONLY) : null,
+  };
+
   // `--context-only` never calls a model, so it needs neither a provider nor a key.
   // `verifyModel` is null when the run stops before the verify stage.
   let chosen: { provider: Provider; apiKey: string; findModel: string; verifyModel: string | null } | null = null;
@@ -302,13 +319,13 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
     if (!models.ok) return usage(models.error);
     chosen = { provider: selection.provider, apiKey: selection.apiKey, findModel: models.find, verifyModel: args.findOnly ? null : models.verify };
     // A pin is an OpenRouter request field; anywhere else it would be silently ignored, and the run would not be what was asked for.
-    for (const name of ['AI_REVIEW_OPENROUTER_ONLY', 'AI_REVIEW_VERIFY_OPENROUTER_ONLY']) {
-      if (parsePin(io.env[name]) !== null && selection.provider.id !== 'openrouter') {
+    // A stage that does not run has no pin to check, and its pin is not on the run line.
+    for (const [name, stage] of [['AI_REVIEW_OPENROUTER_ONLY', 'find'], ['AI_REVIEW_VERIFY_OPENROUTER_ONLY', 'verify']] as const) {
+      if (pins[stage] !== null && selection.provider.id !== 'openrouter') {
         return usage(`${name} works only with the openrouter provider, not ${selection.provider.id}`);
       }
     }
   }
-  const pins = { find: parsePin(io.env.AI_REVIEW_OPENROUTER_ONLY), verify: parsePin(io.env.AI_REVIEW_VERIFY_OPENROUTER_ONLY) };
   const cacheOff = io.env.AI_REVIEW_CACHE === 'off';
 
   // These checks come before the first call: a file that cannot be written must not be found out after the money is spent.
@@ -334,6 +351,8 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
   }
 
   const startedAt = new Date().toISOString();
+  /** Set when the run ended 0 but not whole; it goes on the `run` line. */
+  let runError: string | null = null;
   // What the `run` line reports. Filled in as the run learns it, so a failure still leaves what was known.
   const state: Pick<RunLine, 'head' | 'base' | 'diffOnly' | 'raised' | 'gated' | 'dropped' | 'results'> = {
     head: null,
@@ -349,8 +368,13 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
     provider: chosen?.provider.id ?? null,
     findModel: chosen?.findModel ?? null,
     verifyModel: chosen?.verifyModel ?? null,
-    only: chosen === null ? { find: null, verify: null } : pins,
-    cacheMode: cacheOff ? 'off' : 'default',
+    only: pins,
+    // 'off' only when a stage that ran sent the switch, so a run the list did not touch is not labelled as one that was.
+    cacheMode: [runsFind ? chosen?.findModel : undefined, runsVerify ? chosen?.verifyModel : undefined].some(
+      (model) => model != null && cacheWritesOff({ model, cacheOff, cacheOffModels: io.env.AI_REVIEW_CACHE_OFF_MODELS }),
+    )
+      ? 'off'
+      : 'default',
     pr: args.pr,
     startedAt,
     ...state,
@@ -364,6 +388,14 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
 
   // The request one stage sends. One hook per stage, so a call line says which stage paid for it.
   const writer = rec;
+  // `verifyAll` turns every failure into an `error` verdict and goes on to the next file, so a failed record
+  // write would otherwise be followed by more paid calls whose lines are lost too. The first write error stops
+  // the run's own requests and is rethrown once the stage returns.
+  let writeError: unknown = null;
+  const fetchOnce: typeof fetch = (input, init) => {
+    if (writeError !== null) throw new NonRetryableError('not sent: an earlier call line could not be written');
+    return (io.fetchFn ?? fetch)(input, init);
+  };
   const stageDeps = (stage: 'find' | 'verify', model: string, only: string[] | null): OpenAiDeps => {
     // Present whenever a model is called: `--context-only` returns before any stage.
     const { provider, apiKey } = chosen!;
@@ -371,8 +403,19 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
       endpoint: provider.endpoint,
       apiKey,
       providerName: provider.name,
-      fetchFn: io.fetchFn,
-      ...(writer ? { onResponse: (info) => writer.call(stage, info) } : {}),
+      fetchFn: fetchOnce,
+      ...(writer
+        ? {
+            onResponse: (info) => {
+              try {
+                writer.call(stage, info);
+              } catch (error) {
+                writeError ??= error;
+                throw error;
+              }
+            },
+          }
+        : {}),
       model,
       extraBody: stageExtraBody({ provider, model, only: only?.join(','), cacheOff, cacheOffModels: io.env.AI_REVIEW_CACHE_OFF_MODELS }),
     };
@@ -402,6 +445,7 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
       })),
       fileContent: readFile,
     });
+    if (writeError !== null) throw writeError;
     const byId = new Map(kept.map((f, i) => [`f${i}`, f]));
     state.results = verified.results.map((r) => {
       const f = byId.get(r.id)!;
@@ -438,6 +482,13 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
     const verifyUsd = costUsd(verifyModel, verified.usage);
     const runUsd = findUsd === null || verifyUsd === null ? null : findUsd + verifyUsd;
     io.out(`\n${formatCostLine({ find: p.findUsage, verify: verified.usage, runUsd, totalUsd: runUsd, unpriced: runUsd === null ? 1 : 0 })}`);
+
+    // The exit code stays 0, as it always was; the run line says the verdicts are incomplete, so the harness does not score it.
+    const failed = verified.results.filter((r) => r.verdict === 'error').length;
+    if (failed > 0) {
+      runError = `${failed} of ${verified.results.length} findings not verified`;
+      io.err(runError);
+    }
     return EXIT.ok;
   };
 
@@ -519,6 +570,10 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
       .filter(Boolean);
     const reviewable = filterReviewableFiles(changed, settings.patterns);
     if (reviewable.length === 0) {
+      // A find-only run still leaves a file `--verify-from` accepts: nothing was found, and nothing is left to verify.
+      if (args.findOnly) {
+        saveFindings(args.saveFindings!, { v: 1, pr, head, base: mergeBase, findModel: chosen!.findModel, scope: settings.scope, raised: [], kept: [], dropped: [] });
+      }
       io.out('no reviewable files');
       return EXIT.ok;
     }
@@ -575,6 +630,6 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
     rec.run(runLine(EXIT.failed, chosen!.apiKey === '' ? message : message.replaceAll(chosen!.apiKey, '***')));
     throw error;
   }
-  rec.run(runLine(code, null));
+  rec.run(runLine(code, runError));
   return code;
 }
