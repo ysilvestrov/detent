@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { callStructured, NonRetryableError } from './openai.js';
+import { callStructured, NonRetryableError, type CallInfo } from './openai.js';
 
 const SCHEMA = { type: 'object', properties: {}, additionalProperties: false };
 
@@ -246,6 +246,52 @@ describe('callStructured usage', () => {
   });
 });
 
+describe('callStructured: onResponse', () => {
+  const msgs = [{ role: 'user' as const, content: 'hi' }];
+  const fmt = { name: 'review', schema: SCHEMA };
+  const respond = (body: unknown) =>
+    (async () => ({ ok: true, status: 200, json: async () => body }) as unknown as Response) as unknown as typeof fetch;
+
+  it('reports every response to onResponse, raw usage included', async () => {
+    const seen: CallInfo[] = [];
+    const fetchFn = respond({
+      id: 'gen-1',
+      model: 'm',
+      provider: 'Moonshot AI',
+      choices: [{ finish_reason: 'stop', message: { content: 'abc' } }],
+      usage: { prompt_tokens: 5, prompt_tokens_details: { cache_write_tokens: 3 } },
+    });
+    await callStructured({ ...deps(fetchFn), onResponse: (info) => seen.push(info) }, msgs, fmt);
+    expect(seen).toEqual([
+      {
+        id: 'gen-1',
+        model: 'm',
+        provider: 'Moonshot AI',
+        finishReason: 'stop',
+        contentLength: 3,
+        usage: { prompt_tokens: 5, prompt_tokens_details: { cache_write_tokens: 3 } },
+      },
+    ]);
+  });
+
+  it('reports an empty completion before throwing, because it was billed', async () => {
+    const seen: CallInfo[] = [];
+    const fetchFn = respond({ choices: [{ message: { content: '' } }], usage: { prompt_tokens: 7 } });
+    const err = await callStructured({ ...deps(fetchFn), onResponse: (info) => seen.push(info) }, msgs, fmt).catch((e) => e);
+    expect(err).toBeInstanceOf(NonRetryableError);
+    expect(seen[0]!.contentLength).toBe(0);
+  });
+
+  it('gives null for the fields a response leaves out', async () => {
+    const seen: CallInfo[] = [];
+    const fetchFn = respond({ choices: [{ message: { content: 'a' } }] });
+    await callStructured({ ...deps(fetchFn), onResponse: (info) => seen.push(info) }, msgs, fmt);
+    expect(seen).toEqual([
+      { id: null, model: null, provider: null, finishReason: null, contentLength: 1, usage: null },
+    ]);
+  });
+});
+
 describe('callStructured: provider name, extraBody, key scrubbing', () => {
   const msgs = [{ role: 'user' as const, content: 'hi' }];
   const fmt = { name: 'review', schema: SCHEMA };
@@ -297,6 +343,16 @@ describe('callStructured: provider name, extraBody, key scrubbing', () => {
       }) as unknown as Response) as unknown as typeof fetch;
     const err = (await callStructured(deps(fetchFn), msgs, fmt).catch((e) => e)) as NonRetryableError;
     expect(err.usage?.promptTokens).toBe(7);
+  });
+
+  it('sends only the standard fields when there is no extraBody', async () => {
+    let sentBody: Record<string, unknown> = {};
+    const fetchFn = (async (_u: string, init: RequestInit) => {
+      sentBody = JSON.parse(String(init.body));
+      return ok('{}');
+    }) as unknown as typeof fetch;
+    await callStructured(deps(fetchFn), msgs, fmt);
+    expect(Object.keys(sentBody)).toEqual(['model', 'max_completion_tokens', 'response_format', 'messages']);
   });
 
   it('an empty key replaces nothing', async () => {

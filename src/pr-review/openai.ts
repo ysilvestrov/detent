@@ -31,6 +31,17 @@ export interface JsonSchemaFormat {
   schema: Record<string, unknown>;
 }
 
+/** What one model response carried, as the provider sent it. A field it left out is null. */
+export interface CallInfo {
+  id: string | null;
+  model: string | null;
+  provider: string | null;
+  finishReason: string | null;
+  contentLength: number;
+  /** The raw `usage` object, not parsed: provider-specific fields survive. */
+  usage: unknown;
+}
+
 export interface OpenAiDeps {
   endpoint: string;
   apiKey: string;
@@ -42,6 +53,8 @@ export interface OpenAiDeps {
   providerName?: string;
   /** Extra top-level request fields, appended after the standard ones. */
   extraBody?: Record<string, unknown>;
+  /** Called with every HTTP 200 response, including an empty completion that is about to throw. */
+  onResponse?: (info: CallInfo) => void;
 }
 
 export const DEFAULT_MAX_COMPLETION_TOKENS = 8000;
@@ -131,10 +144,23 @@ async function request(
       }
 
       const data = (await res.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
+        id?: string;
+        model?: string;
+        provider?: string;
+        choices?: Array<{ finish_reason?: string; message?: { content?: string } }>;
         usage?: unknown;
       };
       const content = data.choices?.[0]?.message?.content;
+      // Before the empty-content check: that call was billed too. A throw from the hook is
+      // not caught here on purpose — a failed write must be seen, not swallowed.
+      deps.onResponse?.({
+        id: data.id ?? null,
+        model: data.model ?? null,
+        provider: data.provider ?? null,
+        finishReason: data.choices?.[0]?.finish_reason ?? null,
+        contentLength: content?.length ?? 0,
+        usage: data.usage ?? null,
+      });
       if (!content) {
         // Measured in production 2026-09-23 (warsaw-beer-bot#691): a reasoning model can spend the
         // whole `max_completion_tokens` budget thinking and emit no content. The call

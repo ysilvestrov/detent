@@ -484,6 +484,126 @@ describe('runReview — each stage calls its own model', () => {
 
     expect(models).toEqual(['find-sentinel', 'verify-sentinel']);
   });
+
+  // The replay flags add fields to the request through extraBody. CI never sets it, so its
+  // bodies must stay exactly what they were: same keys, same order, same values.
+  it('sends the same find and verify bodies as before the replay flags', async () => {
+    const bodies: string[] = [];
+    const capture = (async (_url: string, init?: RequestInit) => {
+      bodies.push(init!.body as string);
+      const content =
+        bodies.length === 1
+          ? JSON.stringify({ findings: [FINDING] })
+          : JSON.stringify({
+              verdicts: [{ index: 1, verdict: 'confirmed', evidence: 'line 2 returns not_found' }],
+            });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content } }],
+          usage: { prompt_tokens: 1000, completion_tokens: 100 },
+        }),
+        text: async () => content,
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    await runReview(
+      PR,
+      { ...RUN, findModel: 'find-sentinel', verifyModel: 'verify-sentinel' },
+      deps({ openaiFetch: capture, githubFetch: githubFetch(null).fetchFn }),
+    );
+
+    for (const body of bodies) {
+      expect(Object.keys(JSON.parse(body))).toEqual(['model', 'max_completion_tokens', 'response_format', 'messages']);
+      expect(JSON.stringify(JSON.parse(body))).toBe(body);
+    }
+    const parsed = bodies.map((b) => JSON.parse(b));
+    expect(parsed[0]).toEqual({
+      model: 'find-sentinel',
+      max_completion_tokens: 8000,
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'review_findings',
+          strict: true,
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['findings'],
+            properties: {
+              findings: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['file', 'start_line', 'end_line', 'quote', 'claim', 'why_it_breaks', 'severity', 'confidence'],
+                  properties: {
+                    file: { type: 'string', description: 'repo-relative path, exactly as shown' },
+                    start_line: { type: 'integer' },
+                    end_line: { type: 'integer' },
+                    quote: {
+                      type: 'string',
+                      description: 'verbatim copy of the offending code, exactly as it appears',
+                    },
+                    claim: { type: 'string', description: 'one sentence: what is wrong' },
+                    why_it_breaks: { type: 'string', description: 'concrete failure path: input or state -> wrong result' },
+                    severity: { type: 'string', enum: ['P0', 'P1', 'P2'] },
+                    confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      messages: [
+        { role: 'system', content: 'instructions' },
+        {
+          role: 'user',
+          content: '# Pull request\nTitle: Title\n\n## Body\nBody\n\n# Diff\n```diff\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,3 @@\n function f() {\n+  return \'not_found\';\n }\n```\n\n# Full contents of changed files (at HEAD)\n## src/a.ts\n```\nfunction f() {\n  return \'not_found\';\n}\n\n```',
+        },
+      ],
+    });
+    expect(parsed[1]).toEqual({
+      model: 'verify-sentinel',
+      max_completion_tokens: 2000,
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'review_verdicts',
+          strict: true,
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['verdicts'],
+            properties: {
+              verdicts: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['index', 'verdict', 'evidence'],
+                  properties: {
+                    index: { type: 'integer', description: 'the 1-based number of the finding this verdict answers' },
+                    verdict: { type: 'string', enum: ['confirmed', 'refuted', 'out_of_scope'] },
+                    evidence: { type: 'string', description: 'one sentence citing the code that settles it' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      messages: [
+        { role: 'system', content: 'instructions' },
+        {
+          role: 'user',
+          content: '# 1 finding(s) to adjudicate in src/a.ts\n\nAnswer with one entry per finding, each carrying the finding number as `index`.\n\n## Finding 1\nLines: 2-2\nClaim: merge reported as failure\nAlleged failure: cron stats count a success as a miss\n\nQuoted code:\n```\nreturn \'not_found\';\n```\n\n# Full current contents of src/a.ts\n```\nfunction f() {\n  return \'not_found\';\n}\n\n```',
+        },
+      ],
+    });
+  });
 });
 
 function openaiFetch(responses: string[]): { fetchFn: typeof fetch; calls: string[] } {
