@@ -56,9 +56,12 @@ function main(argv) {
     const shared = join(recordsDir, `batch-${args.batch}.jsonl`);
     if (!existsSync(shared)) throw new Error(`${shared} does not exist`);
     const runs = parseRecords(readFileSync(shared, 'utf8')).filter((line) => line.type === 'run');
-    const { items, key } = anonymize({ runs, read: (name) => JSON.parse(readFileSync(join(recordsDir, name), 'utf8')) });
+    if (existsSync(args.key)) throw new Error(`the key file ${args.key} exists; rerunning would orphan the scores being made against it`);
+    const { items, key, suspects } = anonymize({ runs, read: (name) => JSON.parse(readFileSync(join(recordsDir, name), 'utf8')) });
     writeJson(args.out, items);
     writeJson(args.key, key);
+    if (suspects.length > 0) process.stdout.write(`items naming their own model, for the owner to check: ${suspects.join(', ')}
+`);
     process.stdout.write(`${items.length} runs anonymized into ${args.out}; the key is in ${args.key}\n`);
     return 0;
   } catch (error) {

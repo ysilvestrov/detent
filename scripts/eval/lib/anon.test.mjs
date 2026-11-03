@@ -106,6 +106,45 @@ describe('anonymize', () => {
   });
 });
 
+describe('suspects', () => {
+  const leaky = { findModel: 'vendor-one/model-alpha-large', kept: [{ ...kept('this was found by vendor-one/model-alpha-large'), start_line: 1 }] };
+
+  it('names the item whose text holds the run own model id', () => {
+    const { items, suspects } = anonymize({ runs: [runs[0]], read: () => leaky });
+    expect(suspects).toEqual([items[0].id]);
+  });
+
+  it('names the item whose text holds the run own label', () => {
+    const { items, suspects } = anonymize({ runs: [runs[0]], read: () => ({ kept: [kept('model-alpha says so')] }) });
+    expect(suspects).toEqual([items[0].id]);
+  });
+
+  it('is empty for clean runs', () => {
+    expect(anonymize({ runs, read }).suspects).toEqual([]);
+  });
+});
+
+describe('judges', () => {
+  const verifyRun = (judge, runId) =>
+    run({ runId, mode: 'verify', findingsFile: null, verifyModel: judge, results: [{ file: 'b.ts', line: 7, severity: 'P2', confidence: 'low', quote: 'z', claim: 'c', whyItBreaks: 'w', verdict: 'confirmed', evidence: 'e' }] });
+
+  it('keys each judge of one find apart', () => {
+    const { key } = anonymize({ runs: [verifyRun('judge-x', 'r1'), verifyRun('judge-y', 'r2')], read });
+    expect(Object.values(key).map((k) => k.label)).toEqual(['model-alpha@judge-x', 'model-alpha@judge-y']);
+  });
+
+  it('keeps the plain label for a find', () => {
+    expect(Object.values(anonymize({ runs: [runs[0]], read }).key).map((k) => k.label)).toEqual(['model-alpha']);
+  });
+});
+
+describe('applyKey', () => {
+  it('throws naming both ids when two ids land on one label and draw', () => {
+    const twin = { label: 'model-alpha', draw: 1, pr: '895', batch: 3, attempt: 1 };
+    expect(() => applyKey({ u1: { findings: 1 }, u2: { findings: 2 } }, { u1: twin, u2: twin })).toThrow('u1 and u2');
+  });
+});
+
 describe('applyKey', () => {
   const key = { u1: { label: 'model-alpha', draw: 1, pr: '895', batch: 3, attempt: 1 } };
 

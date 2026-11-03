@@ -32,31 +32,50 @@ function findingsOf(run, read) {
   return run.results.map((r) => pick(r, [...BASE_FIELDS, ...VERIFY_FIELDS]));
 }
 
+const TEXT_FIELDS = ['file', 'quote', 'claim', 'whyItBreaks', 'evidence'];
+
+/** The run's own names; a finding's text holding one may tell the grader whose it is. */
+const namesOf = (run) => [run.label, run.findModel, run.verifyModel].filter((n) => typeof n === 'string' && n !== '');
+
+const mentionsOwnName = (run, findings) =>
+  findings.some((f) => TEXT_FIELDS.some((field) => typeof f[field] === 'string' && namesOf(run).some((name) => f[field].includes(name))));
+
+/** Several judges check one find, so a verify is keyed as `label@verifyModel`. */
+const keyLabel = (run) => (run.mode === 'verify' && run.verifyModel ? `${run.label}@${run.verifyModel}` : run.label);
+
 /**
  * `runs` are `run` lines; `read(findingsFile)` returns the saved findings of a find.
- * Returns the items for the grader and the key that stays out of its task.
+ * Returns the items for the grader, the key that stays out of its task, and `suspects`: ids of items whose text
+ * holds the run's own label or model id (text is left as it is, since the grader checks quotes against the tree).
  */
 export function anonymize({ runs, read, shuffle = shuffleInPlace }) {
   const entries = runs
     .filter((run) => isScorable(run) && !run.expectFailure)
     .map((run) => {
       const id = randomUUID();
+      const findings = findingsOf(run, read);
       return {
-        item: { id, pr: run.pr, head: run.head, stage: run.mode, findings: findingsOf(run, read) },
-        mapped: { label: run.label, draw: run.draw, pr: run.pr, batch: run.batch, attempt: run.attempt },
+        suspect: mentionsOwnName(run, findings),
+        item: { id, pr: run.pr, head: run.head, stage: run.mode, findings },
+        mapped: { label: keyLabel(run), draw: run.draw, pr: run.pr, batch: run.batch, attempt: run.attempt },
       };
     });
   const key = {};
   for (const { item, mapped } of entries) key[item.id] = mapped;
-  return { items: shuffle(entries.map((e) => e.item)), key };
+  const suspects = entries.filter((e) => e.suspect).map((e) => e.item.id);
+  return { items: shuffle(entries.map((e) => e.item)), key, suspects };
 }
 
 /** Anonymous scores to `{label: {draw: scores}}`; an id missing from the key is a mix-up and throws. */
 export function applyKey(anonScores, key) {
   const scores = {};
+  const taken = {};
   for (const [id, value] of Object.entries(anonScores)) {
     const entry = key[id];
     if (entry === undefined) throw new Error(`anonymize: id ${id} is not in the key`);
+    const slot = `${entry.label}|${entry.draw}`;
+    if (taken[slot] !== undefined) throw new Error(`anonymize: ids ${taken[slot]} and ${id} are both label ${entry.label}, draw ${entry.draw}`);
+    taken[slot] = id;
     scores[entry.label] ??= {};
     scores[entry.label][entry.draw] = value;
   }
