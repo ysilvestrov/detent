@@ -460,7 +460,8 @@ describe('the owner sequence, batch 0 to the report', () => {
     expect(s.batch(102, 16).code).toBe(0);
     grade(102, () => counts(1));
     expect(s.batch(103, 16, ...selection, 'gpt-6.1-sol', ...toOpenai).code).toBe(0);
-    grade(103, () => counts(2));
+    expect(s.batch(103, 16, ...selection, 'claude-sonnet-5-5', '--verify-model', 'claude-sonnet-5-5', '--verify-route', 'anthropic').code).toBe(0);
+    grade(103, byLabel({ 'gpt-6.1-sol': counts(2), 'claude-sonnet-5-5': counts(1) }));
   }, STEP_MS);
 
   it('batch 104: the judges on the same inputs', () => {
@@ -496,7 +497,7 @@ describe('the owner sequence, batch 0 to the report', () => {
     beforeAll(() => {
       expect(s.funnel('--note-spend', '0.5', '--reason', 'verify-corpus').code).toBe(0);
       const scoresDir = dirname(s.scoresFile(1));
-      const judges = { 'gpt-5.5': 15, 'claude-haiku-5-5': 14, 'claude-sonnet-5-5': 14, 'gpt-6.1-sol': 13 };
+      const judges = { 'gpt-5.5': 15, 'claude-haiku-5-5': 15, 'claude-sonnet-5-5': 14, 'gpt-6.1-sol': 13 };
       writeFileSync(join(scoresDir, 'judges.json'), JSON.stringify(judges));
       const catalog = s.catalog();
       row(catalog, 'gpt-6.1-terra').dropped = 'one defect of five';
@@ -512,8 +513,8 @@ describe('the owner sequence, batch 0 to the report', () => {
     }, STEP_MS);
 
     it('prints the rows of one finder with each of its judges', () => {
-      expect(lines).toContain('| claude-sonnet-5-5 | anthropic | claude-sonnet-5-5 + gpt-5.5 | 3 | 2/3/3 | 3 | 3 | D4, D5 | 2 | D1, D2 | D3, D4, D5 | - | 0 | 0% | $0.37 | $0.05 |  |');
-      expect(lines).toContain('| claude-sonnet-5-5 | anthropic | claude-sonnet-5-5 + claude-haiku-5-5 | 3 | 2/3/3 | 3 | 3 | D4, D5 | 5 | D1, D2, D3, D4, D5 | none | - | 0 | 0% | $0.30 | $0.03 |  |');
+      expect(lines).toContain('| claude-sonnet-5-5 | anthropic | claude-sonnet-5-5 + gpt-5.5 | 3 | 2/3/3 | 3 | 3 | D4, D5 | 2 | D1, D2 | D3, D4, D5 | - | 0 | 0% | $0.46 | $0.05 |  |');
+      expect(lines).toContain('| claude-sonnet-5-5 | anthropic | claude-sonnet-5-5 + claude-haiku-5-5 | 3 | 2/3/3 | 3 | 3 | D4, D5 | 5 | D1, D2, D3, D4, D5 | none | - | 0 | 0% | $0.39 | $0.03 |  |');
       expect(lines).toContain('| qwen3.8-flash | openrouter | qwen/qwen3.8-flash + gpt-5.5 | 3 | 3/3/3 | 3 | 3 | D4, D5 | 2 | D1, D2 | D3, D4, D5 | - | 1 | 0% | $0.10 | $0.03 |  |');
       expect(lines).toContain('| qwen3.8-flash | openrouter | qwen/qwen3.8-flash + openai/gpt-5.5 | 3 | 3/3/3 | 3 | 3 | D4, D5 | - | - | - | 1 | 0 | 0% | $0.10 | $0.00 |  |');
     });
@@ -536,8 +537,8 @@ describe('the owner sequence, batch 0 to the report', () => {
         'gpt-6.1-sol + claude-sonnet-5-5',
         'gpt-6.1-sol + gpt-6.1-sol',
         'claude-sonnet-5-5 + gpt-5.5',
-        'claude-sonnet-5-5 + claude-haiku-5-5',
         'claude-sonnet-5-5 + claude-sonnet-5-5',
+        'claude-sonnet-5-5 + claude-haiku-5-5',
         'claude-opus-5-5 + gpt-5.5',
         'gpt-6-astra + gpt-5.5',
         'gpt-5.6-sol + gpt-5.5',
@@ -571,6 +572,7 @@ describe('the owner sequence, batch 0 to the report', () => {
         judgeUsd: 0.024,
         composite: false,
         corpus: { real: 3, false: 0, unfalsifiable: 0, published: 3, prs: 3 },
+        corpusFrom: null,
         judgeConsensus: 15,
         brokenCalls: 0,
         medianRecall930: 1,
@@ -591,8 +593,21 @@ describe('the owner sequence, batch 0 to the report', () => {
       expect([r.medianPublished, r.composite, r.judgeConsensus]).toEqual([1, false, 13]);
     });
 
-    it('counts the corpus of the pair that ran it', () => {
-      expect([pairOf('gpt-6.1-sol + gpt-5.5').corpus, pairOf('gpt-6.1-sol + gpt-6.1-sol').corpus.prs]).toEqual([{ real: 6, false: 0, unfalsifiable: 0, published: 6, prs: 3 }, 0]);
+    it('counts the corpus of the pair that ran it, and lends it to the other pairs of the finder', () => {
+      const own = { real: 6, false: 0, unfalsifiable: 0, published: 6, prs: 3 };
+      const ran = pairOf('gpt-6.1-sol + gpt-5.5');
+      const heir = pairOf('gpt-6.1-sol + gpt-6.1-sol');
+      expect([ran.corpus, ran.corpusFrom, heir.corpus, heir.corpusFrom]).toEqual([own, null, own, 'gpt-5.5']);
+    });
+
+    it('admits sonnet + haiku at 5/5 on the corpus sonnet ran under another judge, with the consensus of haiku', () => {
+      const r = pairOf('claude-sonnet-5-5 + claude-haiku-5-5');
+      expect([r.medianPublished, r.judgeConsensus, r.corpusFrom, r.composite]).toEqual([5, 15, 'claude-sonnet-5-5', false]);
+      expect(lines).toContain('- claude-sonnet-5-5 + claude-haiku-5-5: admitted');
+    });
+
+    it('leads anthropic with a note on the inherited corpus, preliminary only for #930', () => {
+      expect(lines).toContain("| best of the best | claude-sonnet-5-5 + claude-haiku-5-5 (preliminary) - no #930 yet; corpus counts from the finder's run with claude-sonnet-5-5 |");
     });
 
     it('leaves the expensive tier and the refuted out of the profiles', () => {
