@@ -99,7 +99,7 @@ export const PRICES: Record<string, Price> = {
  * party came back at exactly this table's arithmetic, so the gpt-5.5 row is
  * ground truth and not a transcription of a web page.
  */
-export const PRICES_CHECKED_ON = '2026-09-22';
+export const PRICES_CHECKED_ON = '2026-11-03';
 
 /** Dollars for `u` at `model`'s rates, or null when we have no verified price. */
 export function costUsd(model: string, u: Usage): number | null {
