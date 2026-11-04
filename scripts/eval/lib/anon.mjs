@@ -40,8 +40,8 @@ const namesOf = (run) => [run.label, run.findModel, run.verifyModel].filter((n) 
 const mentionsOwnName = (run, findings) =>
   findings.some((f) => TEXT_FIELDS.some((field) => typeof f[field] === 'string' && namesOf(run).some((name) => f[field].includes(name))));
 
-/** Batches that hold more than one item per label and draw: batch 1 a find and a verify, batches 103, 104 and 106 several judges. */
-const MULTI_ITEM_BATCHES = [1, 103, 104, 106];
+/** Batches that hold more than one item per label and draw: batch 1 a find and a verify, batches 101, 103, 104 and 106 several judges. */
+const MULTI_ITEM_BATCHES = [1, 101, 103, 104, 106];
 
 /** In those batches a verify or whole run is keyed as `label@judge`, by the judge's id, so the scores do not collide. */
 const keyLabel = (run) =>
