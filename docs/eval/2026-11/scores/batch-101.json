@@ -1,0 +1,53 @@
+{
+  "gpt-6.1-terra": {
+    "1": {
+      "defects": [
+        "R1"
+      ],
+      "findings": 5,
+      "pr": "930"
+    },
+    "2": {
+      "defects": [
+        "R1"
+      ],
+      "findings": 4,
+      "pr": "930"
+    },
+    "3": {
+      "defects": [
+        "R1",
+        "R2"
+      ],
+      "findings": 4,
+      "pr": "930"
+    }
+  },
+  "gpt-5.6-sol": {
+    "1": {
+      "defects": [
+        "R1",
+        "R2"
+      ],
+      "findings": 2,
+      "pr": "930"
+    },
+    "2": {
+      "defects": [
+        "R1",
+        "R2",
+        "R3"
+      ],
+      "findings": 5,
+      "pr": "930"
+    },
+    "3": {
+      "defects": [
+        "R1",
+        "R2"
+      ],
+      "findings": 5,
+      "pr": "930"
+    }
+  }
+}
