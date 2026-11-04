@@ -72,5 +72,28 @@
       "findings": 4,
       "pr": "930"
     }
+  },
+  "claude-sonnet-5-5": {
+    "1": {
+      "defects": [
+        "R1"
+      ],
+      "findings": 2,
+      "pr": "930"
+    },
+    "2": {
+      "defects": [
+        "R1"
+      ],
+      "findings": 1,
+      "pr": "930"
+    },
+    "3": {
+      "defects": [
+        "R1"
+      ],
+      "findings": 2,
+      "pr": "930"
+    }
   }
 }
