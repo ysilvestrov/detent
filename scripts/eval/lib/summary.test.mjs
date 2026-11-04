@@ -155,9 +155,20 @@ describe('summarize: verify', () => {
   });
 
   it('takes the #930 median from the score that names the PR', () => {
-    const lines = [run({ batch: 101, mode: 'whole', pr: '930', draw: 1 }), run({ batch: 101, mode: 'whole', pr: '930', draw: 2 })];
-    const scores = { batches: { 101: { alpha: { 1: score(['D1'], { pr: '930' }), 2: score(['D1', 'D2', 'D3'], { pr: '930' }) } } }, judges: {} };
+    const on930 = (draw) => run({ batch: 101, mode: 'whole', verifyModel: 'gpt-5.5', pr: '930', draw });
+    const lines = [on930(1), on930(2)];
+    const scores = { batches: { 101: { 'alpha@gpt-5.5': { 1: score(['D1'], { pr: '930' }), 2: score(['D1', 'D2', 'D3'], { pr: '930' }) } } }, judges: {} };
     expect(rowOf(summarize({ lines, catalog, scores, cacheRuleApplies: false }), 'alpha').medianRecall930).toBe(2);
+  });
+
+  it('gives each judge of one finder its own #930 median', () => {
+    const on930 = (judge) => run({ batch: 101, mode: 'whole', verifyModel: judge, pr: '930', draw: 1, key: `101|whole|alpha|930|1|${judge}` });
+    const scores = {
+      batches: { 101: { 'alpha@j1': { 1: score(['D1'], { pr: '930' }) }, 'alpha@j2': { 1: score(['D1', 'D2', 'D3'], { pr: '930' }) } } },
+      judges: {},
+    };
+    const rows = summarize({ lines: [on930('j1'), on930('j2')], catalog, scores, cacheRuleApplies: false });
+    expect(rows.map((r) => [r.judge, r.medianRecall930])).toEqual([['j1', 1], ['j2', 3]]);
   });
 
   it('takes the judge consensus of the judge that checked the find', () => {
@@ -524,7 +535,7 @@ describe('summarize: one judge across routes', () => {
   const scores = {
     batches: {
       7: { alpha: { 1: score(['D1', 'D2'], { pr: '418' }) } },
-      101: { alpha: { 1: score(['D1'], { pr: '930' }) } },
+      101: { 'alpha@gpt-5.5': { 1: score(['D1'], { pr: '930' }) } },
       103: { 'alpha@gpt-5.5': { 1: { corpus: { 344: counts } } } },
     },
     judges: { 'gpt-5.5': 15, 'openai/gpt-5.5': 3 },
@@ -773,7 +784,7 @@ describe('stage2Items', () => {
 
 describe('summarize: the PR comes from the key', () => {
   it('reads a batch 101 #930 score as #930 even when the grader wrote another PR', () => {
-    const runs = [run({ batch: 101, mode: 'whole', pr: '930', draw: 1, head: 'h', key: '101|whole|alpha|930|1' })];
+    const runs = [run({ batch: 101, mode: 'whole', verifyModel: 'gpt-5.5', pr: '930', draw: 1, head: 'h', key: '101|whole|alpha|930|1|gpt-5.5' })];
     const { items, key } = anonymize({ runs, read: () => ({ kept: [] }), shuffle: (list) => list });
     const grader = { [items[0].id]: { defects: ['D1', 'D2'], findings: 3, pr: '418' } };
     const row = rowOf(summarize({ lines: runs, catalog, scores: { batches: { 101: applyKey(grader, key) }, judges: {} }, cacheRuleApplies: false }), 'alpha');

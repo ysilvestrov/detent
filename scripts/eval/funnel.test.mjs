@@ -488,7 +488,7 @@ describe('the owner sequence, batch 0 to the report', () => {
     expect(s.batch(101, 16, ...selection, 'gpt-6.1-sol', ...toOpenai).code).toBe(0);
     expect(s.batch(101, 16, ...selection, 'claude-sonnet-5-5', '--verify-model', 'claude-haiku-5-5', '--verify-route', 'anthropic').code).toBe(0);
     expect(runLines(101).filter((line) => line.label === 'qwen3.8-flash' && line.draw === 1).map((line) => line.only)).toEqual([{ find: ['other'], verify: ['openai'] }]);
-    grade(101, byLabel({ 'gpt-5.6-sol': defects('D1'), 'qwen3.8-flash': defects('D1'), 'gpt-6.1-sol': defects('D1', 'D2'), 'claude-sonnet-5-5': defects('D1') }));
+    grade(101, byLabel({ 'gpt-5.6-sol@gpt-5.5': defects('D1'), 'qwen3.8-flash@gpt-5.5': defects('D1'), 'gpt-6.1-sol@gpt-5.5': defects('D1', 'D2'), 'claude-sonnet-5-5@claude-haiku-5-5': defects('D1') }));
   }, STEP_MS);
 
   it('batches 102 and 103: the corpus', () => {
