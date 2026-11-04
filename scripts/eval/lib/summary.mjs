@@ -8,11 +8,11 @@
 //                    `corpus` is {pr: {real, false, unfalsifiable, published}}, counts of the confirmed findings of each corpus PR;
 //                    `applyKey` writes it on the label's draw 1 of batch 102 or 105, and on `<label>@<judge>`'s draw 1 of batch 103, from the grader's per-item fields.
 //                    Batch 105 (generic prompts) is its own row, `<baseline> (generic prompts)`, and is never a profile.
-//                    In batches 1, 103, 104 and 106 a verify or whole run is scored under `<label>@<judge>`, a find under the plain label.
+//                    In batches 1, 101, 103, 104 and 106 a verify or whole run is scored under `<label>@<judge>`, a find under the plain label.
 //   judges.json      {judge: consensus}: how many of 15 the judge got right at `verify-corpus` by consensus, under its id with no vendor prefix.
 //
-// Which scores are which: find-stage D-scores are batches 1-6 under the plain label; published ones are batches 7 and 101
-// under the plain label, and batches 1, 104 and 106 under `<label>@<judge>`.
+// Which scores are which: find-stage D-scores are batches 1-6 under the plain label; published ones are batch 7
+// under the plain label, and batches 1, 101, 104 and 106 under `<label>@<judge>`.
 // A score counts only if a run of that batch, label, draw, PR and judge closed clean (`isScorable`).
 //
 // What belongs to whom: the find-stage fields belong to the finder and appear on each of its rows. Published scores,
@@ -259,7 +259,7 @@ function publishedOf({ entry, judge, scores, closed }) {
   const atJudge = `${label}@${judge}`;
   const sources = generic
     ? [[GENERIC_BATCH, label]]
-    : [[1, atJudge], [7, label], [101, label], [104, atJudge], [106, atJudge]];
+    : [[1, atJudge], [7, label], [101, atJudge], [104, atJudge], [106, atJudge]];
   return sources
     .flatMap(([batch, scoreLabel]) => scoredDraws({ scores, closed, batch, scoreLabel, label, judge }))
     .filter((e) => Array.isArray(e.value.defects));
