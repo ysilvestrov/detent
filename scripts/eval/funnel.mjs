@@ -26,7 +26,7 @@ const DEFAULT_ROOT = join(here, '..', '..');
 const BATCH_7_ESTIMATE_USD = 2.9;
 /** The maker of a model, where its OpenRouter host is named otherwise than the model id. */
 const VENDOR = { qwen: 'alibaba' };
-const SCORED_BATCHES = [2, 3, 4, 5, 6];
+const SCORED_BATCHES = [2, 3, 4, 5, 6, 107, 108];
 
 const say = (line) => process.stdout.write(`${line}\n`);
 

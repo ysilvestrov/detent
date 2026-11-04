@@ -820,7 +820,13 @@ describe('secondTryRows: the models cut by the limit, tried again', () => {
   });
 
   it('prices the calls of each setting', () => {
-    expect(rows[0].paidUsd).toBeCloseTo((2 * 1000 * 1 + 50000 * 2) / 1e6);
+    const paid = secondTryRows({ lines: [findRun(107, 1), call({ key: keyOf(107, 1), usage: usage(50000, 0) })], scores, catalog });
+    expect(paid.map((r) => [r.paidUsd, r.unpriced])).toEqual([[0.101, 0]]);
+  });
+
+  it('counts a call with no usage as unpriced, not as free', () => {
+    const paid = secondTryRows({ lines: [findRun(107, 1), call({ key: keyOf(107, 1), usage: null })], scores, catalog });
+    expect(paid.map((r) => [r.paidUsd, r.unpriced])).toEqual([[0, 1]]);
   });
 
   it('stays out of the rows of the 8000 limit', () => {

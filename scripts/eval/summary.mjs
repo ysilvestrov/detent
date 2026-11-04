@@ -112,7 +112,7 @@ function secondTryTable(rows) {
     '|---|---|---|---|---|---|---|---|---|---|',
     ...rows.map(
       (r) =>
-        `| ${r.label} | ${r.setting} | ${r.runs} | ${r.perDraw.join('/') || '-'} | ${num(r.medianKnown)} | ${r.union.join(' ') || '-'} | ${r.broken} | ${r.maxOutput} | ${num(r.reasoning)} | ${usd(r.paidUsd)} |`,
+        `| ${r.label} | ${r.setting} | ${r.runs} | ${r.perDraw.join('/') || '-'} | ${num(r.medianKnown)} | ${r.union.join(' ') || '-'} | ${r.broken} | ${r.maxOutput} | ${num(r.reasoning)} | ${usd(r.paidUsd)}${r.unpriced > 0 ? ` + ${r.unpriced} unpriced` : ''} |`,
     ),
   ];
 }
