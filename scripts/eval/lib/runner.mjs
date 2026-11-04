@@ -6,7 +6,8 @@ import { admit, nextAction, runKey, savedFindings, startedFinds } from './batche
 import { isScorable, parseRecords, scrubKeys, totalSpend } from './records.mjs';
 
 const KEY_ENV = { openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', openrouter: 'OPENROUTER_API_KEY' };
-const BASE_ENV = ['PATH', 'HOME', 'GH_TOKEN'];
+const PROXY_ENV = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy'];
+const BASE_ENV = ['PATH', 'HOME', 'GH_TOKEN', ...PROXY_ENV, 'NODE_USE_ENV_PROXY'];
 const FINDINGS_DIR = 'findings';
 const META_SUFFIX = '.meta.json';
 const MIN_CORPUS = 3;
@@ -26,7 +27,17 @@ export function childArgs(run, paths) {
   return [...common, ...head, ...route];
 }
 
-/** The environment of the child: three variables of the base, the key of the route, and the settings of the run. */
+/**
+ * The reason this process cannot reach the network, or null. Node's fetch ignores a proxy unless NODE_USE_ENV_PROXY=1
+ * is set when node starts, and in the sandbox a proxy is the only way out.
+ */
+export function proxyRefusal(env) {
+  const proxied = env.HTTPS_PROXY !== undefined || env.https_proxy !== undefined;
+  if (!proxied || env.NODE_USE_ENV_PROXY === '1') return null;
+  return 'a proxy is set, and fetch ignores it without NODE_USE_ENV_PROXY=1: start with NODE_USE_ENV_PROXY=1 node scripts/eval/funnel.mjs ...';
+}
+
+/** The environment of the child: the base variables, the key of the route, and the settings of the run. */
 export function childEnv(run, keys, base) {
   const env = {};
   for (const name of BASE_ENV) if (base[name] !== undefined) env[name] = base[name];

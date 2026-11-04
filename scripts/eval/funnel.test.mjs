@@ -686,4 +686,13 @@ describe('the paths', () => {
     expect(s.funnel('--note-spend', '0.5', '--reason', 'by hand').code).toBe(0);
     expect(readdirSync(join(s.out, 'docs', 'eval', '2026-11', 'records'))).toEqual(['manual.jsonl']);
   });
+
+  it('refuses before any network when a proxy is set without NODE_USE_ENV_PROXY', () => {
+    const result = spawnSync(process.execPath, [join(here, 'funnel.mjs'), '--endpoints'], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, HTTPS_PROXY: 'http://127.0.0.1:1' },
+    });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toBe('a proxy is set, and fetch ignores it without NODE_USE_ENV_PROXY=1: start with NODE_USE_ENV_PROXY=1 node scripts/eval/funnel.mjs ...\n');
+  });
 });

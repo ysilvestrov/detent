@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseRecords } from './records.mjs';
-import { childArgs, childEnv, runBatch, runPreflight } from './runner.mjs';
+import { childArgs, childEnv, proxyRefusal, runBatch, runPreflight } from './runner.mjs';
 
 const KEY = 'sk-or-abcdefghijklmnopqrstuvwxyz0123456789';
 const keys = { OPENROUTER_API_KEY: KEY, OPENAI_API_KEY: 'sk-openai-0123456789abcdefghij', ANTHROPIC_API_KEY: 'sk-ant-0123456789abcdefghij' };
@@ -98,7 +98,62 @@ describe('childArgs', () => {
   });
 });
 
+const REFUSAL = 'a proxy is set, and fetch ignores it without NODE_USE_ENV_PROXY=1: start with NODE_USE_ENV_PROXY=1 node scripts/eval/funnel.mjs ...';
+
+describe('proxyRefusal', () => {
+  it('passes with no proxy', () => {
+    expect(proxyRefusal({ PATH: '/bin' })).toBe(null);
+  });
+
+  it('refuses an upper-case proxy without the setting', () => {
+    expect(proxyRefusal({ HTTPS_PROXY: 'http://p:1' })).toBe(REFUSAL);
+  });
+
+  it('refuses a lower-case proxy without the setting', () => {
+    expect(proxyRefusal({ https_proxy: 'http://p:1' })).toBe(REFUSAL);
+  });
+
+  it('refuses a setting other than 1', () => {
+    expect(proxyRefusal({ HTTPS_PROXY: 'http://p:1', NODE_USE_ENV_PROXY: '0' })).toBe(REFUSAL);
+  });
+
+  it('passes a proxy with the setting', () => {
+    expect(proxyRefusal({ HTTPS_PROXY: 'http://p:1', NODE_USE_ENV_PROXY: '1' })).toBe(null);
+  });
+});
+
 describe('childEnv', () => {
+  it('hands the proxy to the child, and still no other route key', () => {
+    const proxied = {
+      ...base,
+      HTTP_PROXY: 'http://p:1',
+      HTTPS_PROXY: 'http://p:2',
+      NO_PROXY: 'localhost',
+      http_proxy: 'http://p:3',
+      https_proxy: 'http://p:4',
+      no_proxy: '127.0.0.1',
+      NODE_USE_ENV_PROXY: '1',
+      ALL_OTHER: 'not passed',
+      OPENAI_API_KEY: 'sk-from-the-shell',
+    };
+    expect(childEnv(run(), keys, proxied)).toEqual({
+      PATH: '/bin',
+      HOME: '/home/u',
+      GH_TOKEN: 'gh-token',
+      HTTP_PROXY: 'http://p:1',
+      HTTPS_PROXY: 'http://p:2',
+      NO_PROXY: 'localhost',
+      http_proxy: 'http://p:3',
+      https_proxy: 'http://p:4',
+      no_proxy: '127.0.0.1',
+      NODE_USE_ENV_PROXY: '1',
+      OPENROUTER_API_KEY: KEY,
+      AI_REVIEW_MODEL: 'm-find',
+      AI_REVIEW_OPENROUTER_ONLY: 'alibaba',
+      AI_REVIEW_RECORD_META: '{"batch":3,"label":"a","draw":1}',
+    });
+  });
+
   it('is exact for a pinned openrouter find', () => {
     expect(childEnv(run(), keys, base)).toEqual({
       PATH: '/bin',
