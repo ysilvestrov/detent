@@ -1,28 +1,29 @@
 {
-  "gpt-6-astra": {
+  "gpt-6.1-terra@gpt-5.5": {
     "1": {
-      "defects": [
-        "R1"
-      ],
-      "findings": 4,
-      "pr": "930"
-    },
-    "2": {
       "defects": [
         "R1"
       ],
       "findings": 5,
       "pr": "930"
     },
-    "3": {
+    "2": {
       "defects": [
         "R1"
       ],
       "findings": 4,
       "pr": "930"
+    },
+    "3": {
+      "defects": [
+        "R1",
+        "R2"
+      ],
+      "findings": 4,
+      "pr": "930"
     }
   },
-  "gpt-5.6-sol": {
+  "gpt-5.6-sol@gpt-5.5": {
     "1": {
       "defects": [
         "R1",
@@ -49,31 +50,53 @@
       "pr": "930"
     }
   },
-  "gpt-6.1-terra": {
+  "gpt-6.1-terra@gpt-6.1-terra": {
     "1": {
       "defects": [
         "R1"
       ],
-      "findings": 5,
+      "findings": 3,
       "pr": "930"
     },
     "2": {
       "defects": [
         "R1"
       ],
-      "findings": 4,
+      "findings": 2,
       "pr": "930"
     },
     "3": {
       "defects": [
-        "R1",
-        "R2"
+        "R1"
+      ],
+      "findings": 1,
+      "pr": "930"
+    }
+  },
+  "gpt-6-astra@gpt-5.5": {
+    "1": {
+      "defects": [
+        "R1"
+      ],
+      "findings": 4,
+      "pr": "930"
+    },
+    "2": {
+      "defects": [
+        "R1"
+      ],
+      "findings": 5,
+      "pr": "930"
+    },
+    "3": {
+      "defects": [
+        "R1"
       ],
       "findings": 4,
       "pr": "930"
     }
   },
-  "claude-sonnet-5-5": {
+  "claude-sonnet-5-5@claude-sonnet-5-5": {
     "1": {
       "defects": [
         "R1"
