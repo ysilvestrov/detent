@@ -1,23 +1,22 @@
 {
-  "gpt-6.1-terra": {
+  "gpt-6-astra": {
     "1": {
-      "defects": [
-        "R1"
-      ],
-      "findings": 5,
-      "pr": "930"
-    },
-    "2": {
       "defects": [
         "R1"
       ],
       "findings": 4,
       "pr": "930"
     },
+    "2": {
+      "defects": [
+        "R1"
+      ],
+      "findings": 5,
+      "pr": "930"
+    },
     "3": {
       "defects": [
-        "R1",
-        "R2"
+        "R1"
       ],
       "findings": 4,
       "pr": "930"
@@ -47,6 +46,30 @@
         "R2"
       ],
       "findings": 5,
+      "pr": "930"
+    }
+  },
+  "gpt-6.1-terra": {
+    "1": {
+      "defects": [
+        "R1"
+      ],
+      "findings": 5,
+      "pr": "930"
+    },
+    "2": {
+      "defects": [
+        "R1"
+      ],
+      "findings": 4,
+      "pr": "930"
+    },
+    "3": {
+      "defects": [
+        "R1",
+        "R2"
+      ],
+      "findings": 4,
       "pr": "930"
     }
   }
