@@ -290,7 +290,8 @@
         "input": 10,
         "output": 50
       },
-      "note": "best of the best only"
+      "note": "best of the best only",
+      "dropped": "порожня чи обрізана відповідь на #418: вихід вичерпав ліміт 8000"
     }
   ],
   "judges": [
