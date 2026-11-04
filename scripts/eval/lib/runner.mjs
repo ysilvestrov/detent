@@ -8,6 +8,8 @@ import { isScorable, parseRecords, scrubKeys, totalSpend } from './records.mjs';
 const KEY_ENV = { openai: 'OPENAI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', openrouter: 'OPENROUTER_API_KEY' };
 const PROXY_ENV = ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy'];
 const BASE_ENV = ['PATH', 'HOME', 'GH_TOKEN', ...PROXY_ENV, 'NODE_USE_ENV_PROXY'];
+/** The sandbox's proxy wants authentication, and git learns how from GIT_CONFIG_COUNT, GIT_CONFIG_KEY_<n>, GIT_CONFIG_VALUE_<n>. */
+const GIT_CONFIG_ENV = /^GIT_CONFIG_/;
 const FINDINGS_DIR = 'findings';
 const META_SUFFIX = '.meta.json';
 const MIN_CORPUS = 3;
@@ -37,10 +39,14 @@ export function proxyRefusal(env) {
   return 'a proxy is set, and fetch ignores it without NODE_USE_ENV_PROXY=1: start with NODE_USE_ENV_PROXY=1 node scripts/eval/funnel.mjs ...';
 }
 
+/** What every child takes from the funnel's environment; nothing else gets through, a shell's API keys included. */
+function baseEnv(base) {
+  return Object.fromEntries(Object.entries(base).filter(([name, value]) => value !== undefined && (BASE_ENV.includes(name) || GIT_CONFIG_ENV.test(name))));
+}
+
 /** The environment of the child: the base variables, the key of the route, and the settings of the run. */
 export function childEnv(run, keys, base) {
-  const env = {};
-  for (const name of BASE_ENV) if (base[name] !== undefined) env[name] = base[name];
+  const env = baseEnv(base);
   env[KEY_ENV[run.route]] = keys[KEY_ENV[run.route]];
   const finds = run.mode !== 'verify';
   const verifies = run.mode !== 'find';
@@ -351,7 +357,7 @@ function classify(child, scrub) {
  * Code 5 when a check itself failed (nothing is decided then), else 2 when #418 drops or fewer than three corpus PRs remain.
  */
 export async function runPreflight({ catalog, spawnRun, repo, base = process.env, keys = {} }) {
-  const env = Object.fromEntries(BASE_ENV.filter((name) => base[name] !== undefined).map((name) => [name, base[name]]));
+  const env = baseEnv(base);
   const { scrub } = scrubber(keys);
   const reasons = {};
   const failures = {};
