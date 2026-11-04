@@ -5,9 +5,14 @@ import { isVerdicts } from './validate.js';
 
 export type { VerifyRequest, VerifyResult } from './types.js';
 
-/** Verdict budget scales with how many findings share the call. */
+/**
+ * Verdict budget scales with how many findings share the call, above a floor for the reasoning.
+ * Reasoning follows how hard the code is, not how many findings there are: on 2026-11-04 gpt-5.5
+ * finished on up to 3328 tokens, and came back empty with all of 2400 (on an input of 1529) and of
+ * 3600 spent on reasoning (warsaw-beer-bot#691). Only tokens actually used are billed.
+ */
 const TOKENS_PER_VERDICT = 1200;
-const MIN_VERIFY_TOKENS = 2000;
+const MIN_VERIFY_TOKENS = 8000;
 
 export const VERDICTS_SCHEMA: Record<string, unknown> = {
   type: 'object',
