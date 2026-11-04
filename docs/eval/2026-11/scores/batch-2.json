@@ -1,0 +1,82 @@
+{
+  "grok-build-0.1": {
+    "1": {
+      "defects": [
+        "D2"
+      ],
+      "findings": 1,
+      "pr": "418"
+    },
+    "2": {
+      "defects": [
+        "D1"
+      ],
+      "findings": 4,
+      "pr": "418"
+    },
+    "3": {
+      "defects": [
+        "D2"
+      ],
+      "findings": 2,
+      "pr": "418"
+    }
+  },
+  "claude-haiku-5-5": {
+    "1": {
+      "defects": [
+        "D4"
+      ],
+      "findings": 7,
+      "pr": "418"
+    },
+    "2": {
+      "defects": [
+        "D1"
+      ],
+      "findings": 6,
+      "pr": "418"
+    },
+    "3": {
+      "defects": [],
+      "findings": 6,
+      "pr": "418"
+    }
+  },
+  "minimax-m3.1-flash": {
+    "1": {
+      "defects": [],
+      "findings": 0,
+      "pr": "418"
+    },
+    "2": {
+      "defects": [
+        "D1"
+      ],
+      "findings": 5,
+      "pr": "418"
+    },
+    "3": {
+      "defects": [],
+      "findings": 0,
+      "pr": "418"
+    }
+  },
+  "gemini-3.8-flash": {
+    "1": {
+      "defects": [],
+      "findings": 0,
+      "pr": "418"
+    },
+    "2": {
+      "defects": [],
+      "findings": 0,
+      "pr": "418"
+    },
+    "3": {
+      "defects": [],
+      "findings": 0,
+      "pr": "418"
+    }
+  }
+}
