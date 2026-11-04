@@ -403,3 +403,35 @@ describe('startedFinds', () => {
     expect(startedFinds(lines)).toEqual(new Set(['gpt-5.6-sol/418/1']));
   });
 });
+
+describe('planBatch: the second try', () => {
+  const dropped = { ...catalog, candidates: catalog.candidates.map((c) => (c.label === 'kimi-k3.1-pro' ? { ...c, dropped: 'empty' } : c)) };
+  const labels = ['kimi-k3.1-pro'];
+
+  it('takes a dropped model, which every other batch refuses', () => {
+    expect(() => plan({ batch: 4, catalog: dropped, labels })).toThrow('kimi-k3.1-pro is dropped: empty');
+    expect(plan({ batch: 107, catalog: dropped, labels }).map((r) => r.label)).toEqual(['kimi-k3.1-pro']);
+  });
+
+  it.each([
+    [107, [1], 32000, null],
+    [108, [1], null, 'low'],
+    [109, [2, 3], 32000, null],
+    [110, [2, 3], null, 'low'],
+  ])('batch %i runs a find on #418 with its draws and settings', (batch, draws, findMaxTokens, findReasoning) => {
+    const runs = plan({ batch, catalog: dropped, labels });
+    expect(runs.map((r) => [r.draw, r.pr, r.mode, r.findMaxTokens, r.findReasoning])).toEqual(draws.map((draw) => [draw, '418', 'find', findMaxTokens, findReasoning]));
+  });
+
+  it('estimates the whole limit: $0.40 under 32 000 tokens, $0.10 under 8000', () => {
+    const cheap = { ...dropped, candidates: dropped.candidates.map((c) => (c.label === 'kimi-k3.1-pro' ? { ...c, price: { input: 0, output: 12.5 } } : c)) };
+    expect(plan({ batch: 107, catalog: cheap, labels })[0].estimateUsd).toBeCloseTo(0.4);
+    expect(plan({ batch: 108, catalog: cheap, labels })[0].estimateUsd).toBeCloseTo(0.1);
+  });
+
+  it('keeps two settings of one draw apart in the record', () => {
+    const [limit] = plan({ batch: 107, catalog: dropped, labels });
+    const [effort] = plan({ batch: 108, catalog: dropped, labels });
+    expect([runKey(limit), runKey(effort)]).toEqual(['107|find|kimi-k3.1-pro|418|1', '108|find|kimi-k3.1-pro|418|1']);
+  });
+});

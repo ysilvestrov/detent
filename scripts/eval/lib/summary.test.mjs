@@ -12,6 +12,7 @@ import {
   paidUsd,
   productionUsd,
   readsPerWrite,
+  secondTryRows,
   stage2Items,
   summarize,
 } from './summary.mjs';
@@ -789,5 +790,40 @@ describe('summarize: the PR comes from the key', () => {
     const grader = { [items[0].id]: { defects: ['D1', 'D2'], findings: 3, pr: '418' } };
     const row = rowOf(summarize({ lines: runs, catalog, scores: { batches: { 101: applyKey(grader, key) }, judges: {} }, cacheRuleApplies: false }), 'alpha');
     expect([row.medianRecall930, row.medianPublished]).toEqual([2, null]);
+  });
+});
+
+describe('secondTryRows: the models cut by the limit, tried again', () => {
+  const keyOf = (batch, draw) => `${batch}|find|alpha|418|${draw}`;
+  const findRun = (batch, draw) => run({ batch, draw, key: keyOf(batch, draw) });
+  const usage = (out, reasoning) => ({ prompt_tokens: 1000, completion_tokens: out, completion_tokens_details: { reasoning_tokens: reasoning } });
+  const lines = [
+    findRun(107, 1),
+    call({ key: keyOf(107, 1), usage: usage(20000, 19000) }),
+    findRun(108, 1),
+    call({ key: keyOf(108, 1), usage: usage(8000, 8000), contentLength: 0, finishReason: 'length' }),
+    findRun(109, 2),
+    call({ key: keyOf(109, 2), usage: usage(30000, 28000) }),
+  ];
+  const scores = { batches: { 107: { alpha: { 1: score(['D1', 'D2'], { pr: '418' }) } }, 109: { alpha: { 2: score(['D2', 'D3', 'D4'], { pr: '418' }) } } }, judges: {} };
+  const rows = secondTryRows({ lines, scores, catalog });
+
+  it('gives one row per setting, joining the first draw with the later ones', () => {
+    expect(rows.map((r) => [r.label, r.setting, r.runs, r.perDraw, r.medianKnown, r.union])).toEqual([
+      ['alpha', 'limit 32000', 2, [2, 3], 2.5, ['D1', 'D2', 'D3', 'D4']],
+      ['alpha', 'limit 8000, reasoning low', 1, [], null, []],
+    ]);
+  });
+
+  it('shows the largest output and reasoning, and the empty answers', () => {
+    expect(rows.map((r) => [r.maxOutput, r.reasoning, r.broken])).toEqual([[30000, 28000, 0], [8000, 8000, 1]]);
+  });
+
+  it('prices the calls of each setting', () => {
+    expect(rows[0].paidUsd).toBeCloseTo((2 * 1000 * 1 + 50000 * 2) / 1e6);
+  });
+
+  it('stays out of the rows of the 8000 limit', () => {
+    expect(rowOf(summarize({ lines, catalog, scores, cacheRuleApplies: false }), 'alpha')).toBeUndefined();
   });
 });

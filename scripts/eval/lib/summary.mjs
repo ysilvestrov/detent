@@ -22,7 +22,7 @@
 // A row's judge is the id with no vendor prefix, so `gpt-5.5` and `openai/gpt-5.5` are one row; run lines keep what really ran.
 // `runnable` says a clean run put that judge through the finder's own route: without one, nobody can configure the pair.
 // `refutedMean` reads #418 only, the evidence batch 7 excludes on. `costUnknown` says a first run's call has no usable usage or price.
-import { planBatch } from './batches.mjs';
+import { SECOND_TRY, planBatch } from './batches.mjs';
 import { priceOf } from './catalog.mjs';
 import { callUsd, isScorable, judgeId } from './records.mjs';
 import { isUnstable } from './selection.mjs';
@@ -300,7 +300,47 @@ function brokenCount({ calls, runs }) {
   return broken.length + runs.filter((r) => !isScorable(r) && !r.expectFailure && !r.toolFailure && answered.has(attemptOf(r)) && !counted.has(attemptOf(r))).length;
 }
 
-export function summarize({ lines, catalog, scores, cacheRuleApplies }) {
+const isSecondTry = (line) => SECOND_TRY[batchOf(line)] !== undefined;
+
+/**
+ * The second try by label and setting, apart from the rows of the 8000 limit (spec, stage 2, item 7). Each row is a find
+ * only, so it stays preliminary until a judge, #930 and the corpus say otherwise. `perDraw` holds the known defects of the
+ * scored draws, and `reasoning` is null when no call reported any: the provider may not count it.
+ */
+export function secondTryRows({ lines, scores, catalog }) {
+  const rows = new Map();
+  const rowOf = (line) => {
+    const { findMaxTokens, findReasoning } = SECOND_TRY[batchOf(line)];
+    const setting = findReasoning === null ? `limit ${findMaxTokens}` : `limit 8000, reasoning ${findReasoning}`;
+    const id = [labelOf(line), setting].join(SEP);
+    if (!rows.has(id)) rows.set(id, { label: labelOf(line), setting, runs: 0, broken: 0, maxOutput: 0, reasoning: null, paidUsd: 0, scored: [] });
+    return rows.get(id);
+  };
+  for (const line of lines.filter(isSecondTry)) {
+    if (line.type === 'call') {
+      const row = rowOf(line);
+      row.paidUsd += callUsd(line, catalog).usd;
+      if (line.contentLength === 0 || BROKEN_FINISH.includes(line.finishReason)) row.broken += 1;
+      row.maxOutput = Math.max(row.maxOutput, line.usage?.completion_tokens ?? 0);
+      const reasoning = line.usage?.completion_tokens_details?.reasoning_tokens;
+      if (Number.isFinite(reasoning)) row.reasoning = Math.max(row.reasoning ?? 0, reasoning);
+    }
+    if (line.type === 'run') {
+      const row = rowOf(line);
+      row.runs += 1;
+      const score = scores.batches[batchOf(line)]?.[labelOf(line)]?.[line.draw];
+      if (isScorable(line) && score !== undefined) row.scored.push({ draw: line.draw, defects: score.defects });
+    }
+  }
+  return [...rows.values()].map(({ scored, ...row }) => {
+    const sorted = [...scored].sort((a, b) => a.draw - b.draw);
+    const perDraw = sorted.map((s) => s.defects.length);
+    return { ...row, perDraw, medianKnown: median(perDraw), union: sortedUnion(sorted.map((s) => s.defects)) };
+  });
+}
+
+export function summarize({ lines: allLines, catalog, scores, cacheRuleApplies }) {
+  const lines = allLines.filter((line) => !isSecondTry(line));
   const base = catalog.baseline;
   const entries = [
     { label: base.label, findModel: base.findModel, route: base.route, tier: null, dropped: false, generic: false },

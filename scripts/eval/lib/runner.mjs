@@ -58,6 +58,8 @@ export function childEnv(run, keys, base) {
     env.AI_REVIEW_CACHE = 'off';
     env.AI_REVIEW_CACHE_OFF_MODELS = run.cacheOffModels.join(',');
   }
+  if (run.findMaxTokens != null) env.AI_REVIEW_FIND_MAX_TOKENS = String(run.findMaxTokens);
+  if (run.findReasoning != null) env.AI_REVIEW_FIND_REASONING = run.findReasoning;
   env.AI_REVIEW_RECORD_META = JSON.stringify({ batch: run.batch, label: run.label, draw: run.draw });
   return env;
 }

@@ -6,6 +6,14 @@ const VERIFY_BASE_USD = 0.19; // one verify of a #418 find by the baseline judge
 const REFERENCE_JUDGE = 'gpt-5.5';
 const DRAWS = [1, 2, 3];
 const SEP = '|';
+const DEFAULT_FIND_LIMIT = 8000;
+/** The second try at the models cut by the limit (spec, stage 2, item 7): first one draw each way, then two more for those that earned them. */
+export const SECOND_TRY = {
+  107: { draws: [1], findMaxTokens: 32000, findReasoning: null },
+  108: { draws: [1], findMaxTokens: null, findReasoning: 'low' },
+  109: { draws: [2, 3], findMaxTokens: 32000, findReasoning: null },
+  110: { draws: [2, 3], findMaxTokens: null, findReasoning: 'low' },
+};
 
 const fail = (message) => {
   throw new Error(`plan: ${message}`);
@@ -63,6 +71,13 @@ function findUsd(catalog, model, pr) {
   return (size.input * price.input + size.output * price.output) / 1e6;
 }
 
+/** The worst case of a find that may spend its whole limit, since these models are here for spending it. */
+function secondTryUsd(catalog, model, pr, limit) {
+  const price = priceOf(catalog, model);
+  if (!price) fail(`no price for ${model}`);
+  return (catalog.prs[pr].input * price.input + limit * price.output) / 1e6;
+}
+
 function verifyUsd(catalog, model) {
   const price = priceOf(catalog, model);
   const reference = priceOf(catalog, REFERENCE_JUDGE);
@@ -102,11 +117,11 @@ export function planBatch({ batch, catalog, labels, verifyModel, verifyRoute, ju
   // Only batch 0 runs before the preflight; a preflight that refused left no file, so #418 stays stopped too.
   if (batch !== 0 && !preflight) fail(`batch ${batch} needs the preflight`);
 
-  const chosen = () => {
+  const chosen = ({ dropped = false } = {}) => {
     if (!Array.isArray(labels)) fail(`batch ${batch} needs labels`);
     return labels.map((label) => {
       const entry = catalog.candidates.find((c) => c.label === label) ?? fail(`unknown label ${label}`);
-      if (entry.dropped !== undefined) fail(`${label} is dropped: ${entry.dropped}`);
+      if (!dropped && entry.dropped !== undefined) fail(`${label} is dropped: ${entry.dropped}`);
       return entry;
     });
   };
@@ -151,6 +166,17 @@ export function planBatch({ batch, catalog, labels, verifyModel, verifyRoute, ju
   const rounds = (entries, draws, spec) => draws.flatMap((draw) => entries.map((entry) => make({ ...spec, entry, draw })));
   const verifyOf = (entry, pr, draw, judge, extra = {}) =>
     make({ entry, pr, draw, mode: 'verify', judge, from: { label: entry.label, pr, draw }, ...extra });
+
+  const secondTry = SECOND_TRY[batch];
+  if (secondTry !== undefined) {
+    const { draws, findMaxTokens, findReasoning } = secondTry;
+    return rounds(chosen({ dropped: true }), draws, { pr: '418', mode: 'find' }).map((run) => ({
+      ...run,
+      findMaxTokens,
+      findReasoning,
+      estimateUsd: secondTryUsd(catalog, run.findModel, run.pr, findMaxTokens ?? DEFAULT_FIND_LIMIT),
+    }));
+  }
 
   switch (batch) {
     case 0: {
