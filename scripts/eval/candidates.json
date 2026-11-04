@@ -157,6 +157,8 @@
       "tier": "mid",
       "price": {
         "input": 1,
+        "cachedInput": 0.05,
+        "cacheWrite": 1.25,
         "output": 5
       },
       "note": "released 2026-10-26"
@@ -169,6 +171,7 @@
       "tier": "mid",
       "price": {
         "input": 2,
+        "cachedInput": 0.1,
         "cacheWrite": 2.5,
         "output": 10
       }
@@ -263,6 +266,8 @@
       "tier": "expensive",
       "price": {
         "input": 10,
+        "cachedInput": 1,
+        "cacheWrite": 12.5,
         "output": 50
       },
       "note": "best of the best only"
