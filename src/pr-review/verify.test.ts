@@ -273,8 +273,7 @@ describe('verifyAll — billing of a completed but malformed call', () => {
 });
 
 describe('verifyAll — completion budget', () => {
-  // The default must not move: production behaviour is out of scope for this change.
-  it('asks for max(MIN_VERIFY_TOKENS, n * TOKENS_PER_VERDICT) when no budget is given', async () => {
+  it('asks for the 8000 floor when the findings of a call need less', async () => {
     let body: Record<string, unknown> = {};
     const capture = (async (_url: string, init: { body: string }) => {
       body = JSON.parse(init.body);
@@ -294,8 +293,30 @@ describe('verifyAll — completion budget', () => {
       fileContent: () => 'body',
     });
 
-    // 2 requests * 1200 = 2400, which is above MIN_VERIFY_TOKENS (2000).
-    expect(body.max_completion_tokens).toBe(2400);
+    expect(body.max_completion_tokens).toBe(8000);
+  });
+
+  it('asks for 1200 per finding above the floor', async () => {
+    let body: Record<string, unknown> = {};
+    const capture = (async (_url: string, init: { body: string }) => {
+      body = JSON.parse(init.body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: '{"verdicts":[{"index":1,"verdict":"confirmed","evidence":"x"}]}' } }],
+          usage: { prompt_tokens: 10, completion_tokens: 2 },
+        }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    await verifyAll(deps(capture), {
+      instructions: 'verify',
+      requests: ['f0', 'f1', 'f2', 'f3', 'f4', 'f5', 'f6'].map((id) => req({ id })),
+      fileContent: () => 'body',
+    });
+
+    expect(body.max_completion_tokens).toBe(8400);
   });
 
   it('uses the caller\'s budget when one is given', async () => {
