@@ -567,7 +567,7 @@ describe('runReview — each stage calls its own model', () => {
     });
     expect(parsed[1]).toEqual({
       model: 'verify-sentinel',
-      max_completion_tokens: 2000,
+      max_completion_tokens: 8000,
       response_format: {
         type: 'json_schema',
         json_schema: {
