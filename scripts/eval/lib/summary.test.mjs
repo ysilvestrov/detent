@@ -622,6 +622,10 @@ describe('summarize: what breaks a pair', () => {
     expect(brokenOf([run({ exit: 5, error: 'git fetch origin pull/895/head failed: Proxy CONNECT aborted' })])).toBe(0);
   });
 
+  it('does not count a good answer whose findings the funnel failed to copy', () => {
+    expect(brokenOf([call({}), run({ exit: 5, error: 'findings copy failed: ENOSPC', toolFailure: true })])).toBe(0);
+  });
+
   it('counts a run that failed with content and stop', () => {
     expect(brokenOf([call({}), run({ exit: 5, error: 'the answer did not parse' })])).toBe(1);
   });

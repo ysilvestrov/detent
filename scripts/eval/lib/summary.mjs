@@ -288,7 +288,8 @@ function corpusOf({ entry, judge, scores, closed }) {
 
 /**
  * Empty or cut answers, plus failed runs that got an answer and left no such call: an unparseable one has content and
- * `stop`. A failed run with no call never got an answer, so a failed `git fetch` or a killed child is not the model's.
+ * `stop`. A failed run with no call never got an answer, so a failed `git fetch` or a killed child is not the model's,
+ * and neither is what the funnel itself recorded after a good answer (`toolFailure`).
  */
 function brokenCount({ calls, runs }) {
   const isBroken = (c) => c.contentLength === 0 || BROKEN_FINISH.includes(c.finishReason);
@@ -296,7 +297,7 @@ function brokenCount({ calls, runs }) {
   const broken = calls.filter(isBroken);
   const counted = new Set(broken.map(attemptOf));
   const answered = new Set(calls.map(attemptOf));
-  return broken.length + runs.filter((r) => !isScorable(r) && !r.expectFailure && answered.has(attemptOf(r)) && !counted.has(attemptOf(r))).length;
+  return broken.length + runs.filter((r) => !isScorable(r) && !r.expectFailure && !r.toolFailure && answered.has(attemptOf(r)) && !counted.has(attemptOf(r))).length;
 }
 
 export function summarize({ lines, catalog, scores, cacheRuleApplies }) {
