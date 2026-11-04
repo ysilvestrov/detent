@@ -77,6 +77,31 @@ describe('checkLabels', () => {
   });
 });
 
+describe('checkLabels: the second try', () => {
+  const scoresByBatch = { 107: { a: { 1: score(['D1', 'D2']) }, b: { 1: score(['D1']) } }, 108: { c: { 1: score([]) } } };
+
+  it('refuses the later draws before the first one is scored', () => {
+    expect(checkLabels({ batch: 109, labels: ['a'], scoresByBatch: {} })).toBe('batch 109 needs the scores of batch 107');
+  });
+
+  it('ends the try at one known defect, and for a model that never ran', () => {
+    expect(checkLabels({ batch: 109, labels: ['a', 'b', 'z'], scoresByBatch })).toBe('batch 109: b, z found under 2 known defects in batch 107');
+  });
+
+  it('reads the first draw of its own setting', () => {
+    expect(checkLabels({ batch: 110, labels: ['c'], scoresByBatch })).toBe('batch 110: c found under 2 known defects in batch 108');
+    expect(checkLabels({ batch: 110, labels: ['a'], scoresByBatch })).toBe('batch 110: a found under 2 known defects in batch 108');
+  });
+
+  it('lets two known defects through', () => {
+    expect(checkLabels({ batch: 109, labels: ['a'], scoresByBatch })).toBe(null);
+  });
+
+  it('asks nothing of the first draws', () => {
+    expect(checkLabels({ batch: 107, labels: ['z'], scoresByBatch: {} })).toBe(null);
+  });
+});
+
 describe('checkLabels batch 7', () => {
   const scoresByBatch = { 2: { a: { 1: score(['D1']) } }, 5: { b: { 1: score(['D1']) } } };
 

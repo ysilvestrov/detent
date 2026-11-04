@@ -156,6 +156,15 @@ describe('childEnv', () => {
     });
   });
 
+  it('hands the second try its settings, and no such variable to any other run', () => {
+    const env = (over) => childEnv(run(over), keys, base);
+    expect(env({ findMaxTokens: 32000, findReasoning: null })).toMatchObject({ AI_REVIEW_FIND_MAX_TOKENS: '32000' });
+    expect(env({ findMaxTokens: null, findReasoning: 'low' })).toMatchObject({ AI_REVIEW_FIND_REASONING: 'low' });
+    expect(Object.keys(env({ findMaxTokens: 32000, findReasoning: null }))).not.toContain('AI_REVIEW_FIND_REASONING');
+    expect(Object.keys(env())).not.toContain('AI_REVIEW_FIND_MAX_TOKENS');
+    expect(Object.keys(env())).not.toContain('AI_REVIEW_FIND_REASONING');
+  });
+
   it('hands the proxy to the child, and still no other route key', () => {
     const proxied = {
       ...base,

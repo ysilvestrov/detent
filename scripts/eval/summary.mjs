@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { loadCatalog } from './lib/catalog.mjs';
 import { admitted, pickProfiles, proposeFinalists } from './lib/profiles.mjs';
 import { parseRecords } from './lib/records.mjs';
-import { anthropicCalls, anthropicThinking, baselineRowOf, cacheFields, executorVisibility, paidByRoute, prOf, readsPerWrite, stage2Items, summarize } from './lib/summary.mjs';
+import { anthropicCalls, anthropicThinking, baselineRowOf, cacheFields, executorVisibility, paidByRoute, prOf, readsPerWrite, secondTryRows, stage2Items, summarize } from './lib/summary.mjs';
 
 const USAGE = 'Usage: node scripts/eval/summary.mjs --batch-from <n> [--cache-rule on|off] [--detent <dir>] [--out-root <dir>]';
 
@@ -103,6 +103,20 @@ function profileTables(picks) {
   ]);
 }
 
+function secondTryTable(rows) {
+  if (rows.length === 0) return ['not run'];
+  return [
+    'A find alone, on #418: preliminary, and not mixed with the rows of the 8000 limit.',
+    '',
+    '| label | setting | runs | known defects per draw | median | union | empty or cut | largest output | largest reasoning | paid |',
+    '|---|---|---|---|---|---|---|---|---|---|',
+    ...rows.map(
+      (r) =>
+        `| ${r.label} | ${r.setting} | ${r.runs} | ${r.perDraw.join('/') || '-'} | ${num(r.medianKnown)} | ${r.union.join(' ') || '-'} | ${r.broken} | ${r.maxOutput} | ${num(r.reasoning)} | ${usd(r.paidUsd)}${r.unpriced > 0 ? ` + ${r.unpriced} unpriced` : ''} |`,
+    ),
+  ];
+}
+
 function stage2Table(items) {
   const total = items.reduce((sum, item) => sum + item.usd, 0);
   return ['| # | item | estimate |', '|---|---|---|', ...items.map((item) => `| ${item.item} | ${item.what} | ${usd(item.usd)} |`), '', `Total: ${usd(total)}.`];
@@ -146,6 +160,8 @@ function main(argv) {
   out.push(...(picks === null ? ['', 'No baseline row yet, so no candidates.'] : profileTables(picks)));
   out.push('', '## Admission', '');
   for (const r of rows) out.push(`- ${r.pair}${r.generic ? ' (generic prompts)' : ''}: ${admitted(r).ok ? 'admitted' : admitted(r).reasons.join('; ')}`);
+  out.push('', '## Second try of the models cut by the limit', '');
+  out.push(...secondTryTable(secondTryRows({ lines, scores, catalog })));
   out.push('', '## Stage 2, with what the plan estimates', '');
   out.push(...stage2Table(stage2Items({ catalog, corpus, finalists, pairs })));
   out.push('', '## Cache counters seen in prompt_tokens_details', '');

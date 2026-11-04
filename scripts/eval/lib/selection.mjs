@@ -31,7 +31,17 @@ export function survivors(batch, scoresByBatch) {
 }
 
 /** The reason a batch must not start with these labels, or null. */
+/** The second try's later draws and the first draw they follow; 0-1 known defects there ends the model's try (spec, stage 2, item 7). */
+const SECOND_TRY_BEFORE = { 109: 107, 110: 108 };
+const SECOND_TRY_MIN_DEFECTS = 2;
+
 export function checkLabels({ batch, labels, scoresByBatch }) {
+  const first = SECOND_TRY_BEFORE[batch];
+  if (first !== undefined) {
+    if (scoresByBatch[first] === undefined) return `batch ${batch} needs the scores of batch ${first}`;
+    const out = labels.filter((label) => (scoresByBatch[first][label]?.[1]?.defects.length ?? 0) < SECOND_TRY_MIN_DEFECTS);
+    if (out.length > 0) return `batch ${batch}: ${out.join(', ')} found under ${SECOND_TRY_MIN_DEFECTS} known defects in batch ${first}`;
+  }
   const before = SCORED_BEFORE[batch];
   if (before !== undefined) {
     if (scoresByBatch[before] === undefined) return `batch ${batch} needs the scores of batch ${before}`;
