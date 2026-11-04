@@ -593,6 +593,7 @@ describe('runBatch after a failure', () => {
     expect(lines[0].usage.cost).toBe(0.1);
     expect(lines[1].exit).toBe(0);
     expect(lines[1].error).toMatch(/^findings copy failed: /);
+    expect(lines[1].toolFailure).toBe(true);
     expect(lines[1].findingsFile).toBe(null);
     expect(result).toEqual({ code: 5, spentUsd: 0.1, done: 0, failed: 1, left: 0, notApplicable: 0 });
   });

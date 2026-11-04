@@ -180,7 +180,7 @@ function absorb({ meta, recordPath, findingsPath, childCode, recordsDir, scrub }
   }
   if (!present.some((line) => line.type === 'run') && (closing !== undefined || !meta.expectFailure)) {
     const base = closing ?? { type: 'run', runId: lines[0]?.runId ?? meta.id, batch: meta.batch, label: meta.label, provider: meta.route, pr: meta.pr, draw: meta.draw };
-    const line = problem === null ? base : { ...base, exit: code ?? 1, error: problem === ORPHAN || closing === undefined || closing.error === null ? problem : closing.error };
+    const line = problem === null ? base : { ...base, exit: code ?? 1, error: problem === ORPHAN || closing === undefined || closing.error === null ? problem : closing.error, toolFailure: true };
     appendLines(shared, [enrich(line, findingsFile)]);
   }
   return { clean };
