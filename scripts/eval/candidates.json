@@ -60,22 +60,24 @@
         "output": 0.47,
         "cachedInput": 0.016
       },
-      "note": "host Alibaba"
+      "note": "host Alibaba",
+      "dropped": "порожня відповідь: міркування вичерпали ліміт 8000, іншого виконавця немає"
     },
     {
       "label": "deepseek-v4.1-flash-1017",
       "model": "deepseek/deepseek-v4.1-flash-1017",
       "route": "openrouter",
       "only": [
-        "morph/fp8"
+        "deepinfra/fp8"
       ],
       "tier": "cheap",
       "price": {
-        "input": 0.032,
-        "output": 0.288,
-        "cachedInput": 0.005
+        "input": 0.098,
+        "output": 0.294,
+        "cachedInput": 0.00294
       },
-      "note": "DeepSeek itself has no structured_outputs, another host"
+      "note": "DeepSeek itself has no structured_outputs, another host",
+      "dropped": "порожня відповідь: міркування вичерпали ліміт 8000 і на іншому виконавці"
     },
     {
       "label": "minimax-m3.1-flash",
@@ -105,21 +107,23 @@
         "output": 1.25,
         "cachedInput": 0.075
       },
-      "note": "released 2026-11-02; GLM did not finish a call in September"
+      "note": "released 2026-11-02; GLM did not finish a call in September",
+      "dropped": "порожня відповідь: міркування вичерпали ліміт 8000, іншого виконавця немає"
     },
     {
       "label": "mimo-v2.6-pro",
       "model": "xiaomi/mimo-v2.6-pro",
       "route": "openrouter",
       "only": [
-        "xiaomi/fp8"
+        "deepinfra/fp8"
       ],
       "tier": "cheap",
       "price": {
-        "input": 0.435,
-        "output": 0.87,
-        "cachedInput": 0.0036
-      }
+        "input": 0.387,
+        "output": 0.783,
+        "cachedInput": 0.00324
+      },
+      "dropped": "порожня відповідь: міркування вичерпали ліміт 8000 і на іншому виконавці"
     },
     {
       "label": "step-5-preview",
@@ -140,14 +144,15 @@
       "model": "tencent/hy4-preview",
       "route": "openrouter",
       "only": [
-        "tencent/fp8"
+        "atlas-cloud/fp8"
       ],
       "tier": "cheap",
       "price": {
         "input": 0.834,
         "output": 2.501,
         "cachedInput": 0.042
-      }
+      },
+      "dropped": "порожня відповідь: міркування вичерпали ліміт 8000 і на іншому виконавці"
     },
     {
       "label": "gpt-6.1-terra",
@@ -229,7 +234,8 @@
         "output": 10,
         "cachedInput": 0.2
       },
-      "note": "host Moonshot only"
+      "note": "host Moonshot only",
+      "dropped": "порожня відповідь: міркування вичерпали ліміт 8000, іншого виконавця немає"
     },
     {
       "label": "qwen3.8-max-0902",
@@ -244,7 +250,8 @@
         "output": 6,
         "cachedInput": 0.25
       },
-      "note": "host Alibaba"
+      "note": "host Alibaba",
+      "dropped": "порожня відповідь: міркування вичерпали ліміт 8000, іншого виконавця немає"
     },
     {
       "label": "claude-opus-5-5",
