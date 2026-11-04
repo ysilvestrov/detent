@@ -22,11 +22,14 @@
       "label": "gemini-3.8-flash",
       "model": "google/gemini-3.8-flash",
       "route": "openrouter",
-      "only": null,
+      "only": [
+        "google-vertex/global"
+      ],
       "tier": "cheap",
       "price": {
         "input": 0.75,
-        "output": 3.75
+        "output": 3.75,
+        "cachedInput": 0.075
       },
       "note": "doubles from 2027-01-01"
     },
@@ -34,22 +37,28 @@
       "label": "grok-build-0.1",
       "model": "x-ai/grok-build-0.1",
       "route": "openrouter",
-      "only": null,
+      "only": [
+        "xai"
+      ],
       "tier": "cheap",
       "price": {
         "input": 1,
-        "output": 2
+        "output": 2,
+        "cachedInput": 0.2
       }
     },
     {
       "label": "qwen3.8-flash",
       "model": "qwen/qwen3.8-flash",
       "route": "openrouter",
-      "only": null,
+      "only": [
+        "alibaba/us-east-1"
+      ],
       "tier": "cheap",
       "price": {
         "input": 0.15,
-        "output": 0.47
+        "output": 0.47,
+        "cachedInput": 0.016
       },
       "note": "host Alibaba"
     },
@@ -57,11 +66,14 @@
       "label": "deepseek-v4.1-flash-1017",
       "model": "deepseek/deepseek-v4.1-flash-1017",
       "route": "openrouter",
-      "only": null,
+      "only": [
+        "morph/fp8"
+      ],
       "tier": "cheap",
       "price": {
-        "input": 0.15,
-        "output": 0.6
+        "input": 0.032,
+        "output": 0.288,
+        "cachedInput": 0.005
       },
       "note": "DeepSeek itself has no structured_outputs, another host"
     },
@@ -69,11 +81,14 @@
       "label": "minimax-m3.1-flash",
       "model": "minimax/minimax-m3.1-flash",
       "route": "openrouter",
-      "only": null,
+      "only": [
+        "parasail/fp8"
+      ],
       "tier": "cheap",
       "price": {
         "input": 0.15,
-        "output": 0.6
+        "output": 0.6,
+        "cachedInput": 0.015
       },
       "note": "same at Minimax"
     },
@@ -81,11 +96,14 @@
       "label": "glm-5.3-flashx-legal",
       "model": "z-ai/glm-5.3-flashx-legal",
       "route": "openrouter",
-      "only": null,
+      "only": [
+        "z-ai/fp8"
+      ],
       "tier": "cheap",
       "price": {
         "input": 0.37,
-        "output": 1.25
+        "output": 1.25,
+        "cachedInput": 0.075
       },
       "note": "released 2026-11-02; GLM did not finish a call in September"
     },
@@ -93,33 +111,42 @@
       "label": "mimo-v2.6-pro",
       "model": "xiaomi/mimo-v2.6-pro",
       "route": "openrouter",
-      "only": null,
+      "only": [
+        "xiaomi/fp8"
+      ],
       "tier": "cheap",
       "price": {
-        "input": 0.43,
-        "output": 0.87
+        "input": 0.435,
+        "output": 0.87,
+        "cachedInput": 0.0036
       }
     },
     {
       "label": "step-5-preview",
       "model": "stepfun/step-5-preview",
       "route": "openrouter",
-      "only": null,
+      "only": [
+        "stepfun/fp8"
+      ],
       "tier": "cheap",
       "price": {
         "input": 1,
-        "output": 2.7
+        "output": 2.7,
+        "cachedInput": 0.1
       }
     },
     {
       "label": "hy4-preview",
       "model": "tencent/hy4-preview",
       "route": "openrouter",
-      "only": null,
+      "only": [
+        "tencent/fp8"
+      ],
       "tier": "cheap",
       "price": {
-        "input": 0.83,
-        "output": 2.5
+        "input": 0.834,
+        "output": 2.501,
+        "cachedInput": 0.042
       }
     },
     {
@@ -161,11 +188,14 @@
       "label": "gemini-4-argon",
       "model": "google/gemini-4-argon",
       "route": "openrouter",
-      "only": null,
+      "only": [
+        "google-vertex/global"
+      ],
       "tier": "mid",
       "price": {
         "input": 2,
-        "output": 10
+        "output": 10,
+        "cachedInput": 0.1
       },
       "note": "doubles from 2026-12-01"
     },
@@ -173,22 +203,28 @@
       "label": "grok-4.7",
       "model": "x-ai/grok-4.7",
       "route": "openrouter",
-      "only": null,
+      "only": [
+        "xai/zdr"
+      ],
       "tier": "mid",
       "price": {
         "input": 2,
-        "output": 6
+        "output": 6,
+        "cachedInput": 0.5
       }
     },
     {
       "label": "kimi-k3.1-pro",
       "model": "moonshotai/kimi-k3.1-pro",
       "route": "openrouter",
-      "only": null,
+      "only": [
+        "moonshotai/mxfp4"
+      ],
       "tier": "mid",
       "price": {
         "input": 2,
-        "output": 10
+        "output": 10,
+        "cachedInput": 0.2
       },
       "note": "host Moonshot only"
     },
@@ -196,11 +232,14 @@
       "label": "qwen3.8-max-0902",
       "model": "qwen/qwen3.8-max-0902",
       "route": "openrouter",
-      "only": null,
+      "only": [
+        "alibaba/us-east-1"
+      ],
       "tier": "mid",
       "price": {
         "input": 2,
-        "output": 6
+        "output": 6,
+        "cachedInput": 0.25
       },
       "note": "host Alibaba"
     },
@@ -244,10 +283,13 @@
   "judges": [
     {
       "model": "openai/gpt-5.5",
-      "only": null,
+      "only": [
+        "openai"
+      ],
       "price": {
         "input": 5,
-        "output": 30
+        "output": 30,
+        "cachedInput": 0.5
       }
     }
   ],
