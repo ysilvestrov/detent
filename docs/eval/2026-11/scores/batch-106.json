@@ -1,0 +1,33 @@
+{
+  "claude-sonnet-5-5@claude-sonnet-5-5": {
+    "1": {
+      "defects": [
+        "D1",
+        "D3",
+        "D4",
+        "D5"
+      ],
+      "findings": 4,
+      "pr": "418"
+    },
+    "2": {
+      "defects": [
+        "D1",
+        "D3",
+        "D4"
+      ],
+      "findings": 3,
+      "pr": "418"
+    },
+    "3": {
+      "defects": [
+        "D2",
+        "D3",
+        "D4",
+        "D5"
+      ],
+      "findings": 5,
+      "pr": "418"
+    }
+  }
+}
