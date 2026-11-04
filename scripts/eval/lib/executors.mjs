@@ -1,9 +1,11 @@
 // Which OpenRouter host serves a model in the big test: the rule of the spec, applied to a `/endpoints` response.
 const QUANTIZATIONS = ['fp8', 'fp16', 'bf16', 'fp32'];
 const PER_MILLION = 1e6;
+/** A tag ending so names a service tier of a host, with its own price and behaviour, not the host a reader gets by default. */
+const TIER_TAG = /\/(flex|spot|priority|fast)$/;
 
 const normalize = (name) => String(name).toLowerCase().replace(/[^a-z0-9]/g, '');
-const hasSchema = (endpoint) => (endpoint.supported_parameters ?? []).includes('structured_outputs');
+const hasSchema = (endpoint) => (endpoint.supported_parameters ?? []).includes('structured_outputs') && !TIER_TAG.test(endpoint.tag);
 const perMillion = (perToken) => Number((Number(perToken) * PER_MILLION).toPrecision(10));
 
 function priceOf(endpoint) {
@@ -12,8 +14,9 @@ function priceOf(endpoint) {
     input: perMillion(prompt),
     output: perMillion(completion),
     ...(read === undefined ? {} : { cachedInput: perMillion(read) }),
-    // A write price of zero means no write tariff: a `cacheWrite` of 0 would price a first run's input at nothing.
-    ...(Number(write) > 0 ? { cacheWrite: perMillion(write) } : {}),
+    // Only a write price above the input is a write tariff. Zero would price a first run's input at nothing, and
+    // Google's far smaller figure would price it at a fraction: `productionUsd` bills the whole input at `cacheWrite`.
+    ...(Number(write) > Number(prompt) ? { cacheWrite: perMillion(write) } : {}),
   };
 }
 
@@ -29,7 +32,8 @@ export function withoutHost(endpoints, host) {
 
 /**
  * The model's own host if it has `structured_outputs`; otherwise the cheapest host with them, quantized fp8 or better,
- * with 100 uptime over the last 30 minutes. `{tag, price}` (price per million tokens), or null when nobody fits.
+ * with 100 uptime over the last 30 minutes. A service tier is not a host for either. `{tag, price}` (price per million
+ * tokens), or null when nobody fits.
  */
 export function chooseExecutor(modelVendor, endpoints) {
   const withSchema = endpoints.filter(hasSchema);
