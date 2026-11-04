@@ -1,0 +1,32 @@
+{
+  "gpt-5.6-sol": {
+    "1": {
+      "corpus": {
+        "344": {
+          "real": 7,
+          "false": 0,
+          "unfalsifiable": 0,
+          "published": 7
+        },
+        "352": {
+          "real": 2,
+          "false": 0,
+          "unfalsifiable": 0,
+          "published": 2
+        },
+        "356": {
+          "real": 1,
+          "false": 0,
+          "unfalsifiable": 0,
+          "published": 1
+        },
+        "358": {
+          "real": 7,
+          "false": 0,
+          "unfalsifiable": 0,
+          "published": 7
+        }
+      }
+    }
+  }
+}

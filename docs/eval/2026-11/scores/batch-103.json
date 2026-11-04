@@ -1,0 +1,62 @@
+{
+  "gpt-6.1-terra@gpt-5.5": {
+    "1": {
+      "corpus": {
+        "344": {
+          "real": 6,
+          "false": 0,
+          "unfalsifiable": 0,
+          "published": 6
+        },
+        "352": {
+          "real": 2,
+          "false": 0,
+          "unfalsifiable": 0,
+          "published": 2
+        },
+        "356": {
+          "real": 1,
+          "false": 0,
+          "unfalsifiable": 1,
+          "published": 2
+        },
+        "358": {
+          "real": 7,
+          "false": 0,
+          "unfalsifiable": 0,
+          "published": 7
+        }
+      }
+    }
+  },
+  "claude-sonnet-5-5@claude-sonnet-5-5": {
+    "1": {
+      "corpus": {
+        "344": {
+          "real": 2,
+          "false": 0,
+          "unfalsifiable": 0,
+          "published": 2
+        },
+        "352": {
+          "real": 0,
+          "false": 0,
+          "unfalsifiable": 0,
+          "published": 0
+        },
+        "356": {
+          "real": 0,
+          "false": 0,
+          "unfalsifiable": 0,
+          "published": 0
+        },
+        "358": {
+          "real": 4,
+          "false": 0,
+          "unfalsifiable": 0,
+          "published": 4
+        }
+      }
+    }
+  }
+}
