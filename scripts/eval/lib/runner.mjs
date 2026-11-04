@@ -32,7 +32,7 @@ export function childArgs(run, paths) {
  * is set when node starts, and in the sandbox a proxy is the only way out.
  */
 export function proxyRefusal(env) {
-  const proxied = env.HTTPS_PROXY !== undefined || env.https_proxy !== undefined;
+  const proxied = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy'].some((name) => env[name] !== undefined);
   if (!proxied || env.NODE_USE_ENV_PROXY === '1') return null;
   return 'a proxy is set, and fetch ignores it without NODE_USE_ENV_PROXY=1: start with NODE_USE_ENV_PROXY=1 node scripts/eval/funnel.mjs ...';
 }

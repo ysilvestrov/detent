@@ -113,6 +113,14 @@ describe('proxyRefusal', () => {
     expect(proxyRefusal({ https_proxy: 'http://p:1' })).toBe(REFUSAL);
   });
 
+  it('refuses an upper-case http proxy without the setting', () => {
+    expect(proxyRefusal({ HTTP_PROXY: 'http://p:1' })).toBe(REFUSAL);
+  });
+
+  it('refuses a lower-case http proxy without the setting', () => {
+    expect(proxyRefusal({ http_proxy: 'http://p:1' })).toBe(REFUSAL);
+  });
+
   it('refuses a setting other than 1', () => {
     expect(proxyRefusal({ HTTPS_PROXY: 'http://p:1', NODE_USE_ENV_PROXY: '0' })).toBe(REFUSAL);
   });
