@@ -196,7 +196,7 @@ cd ~/projects/warsaw-beer-bot && git pull && npm ci
 cd ~/projects/detent && GH_TOKEN=<токен лише на читання> claude --settings scripts/eval/claude-sandbox.json --add-dir ~/projects/warsaw-beer-bot
 ```
 
-У сесії: `node scripts/eval/funnel.mjs --keys ~/.config/detent/keys.env --batch 0 --ceiling 11`. `GH_TOKEN` — окремий токен GitHub для `gh pr view` на публічному репозиторії, не особистий. Хуків і локальних MCP-серверів у цій установці немає.
+У сесії: `NODE_USE_ENV_PROXY=1 node scripts/eval/funnel.mjs --keys ~/.config/detent/keys.env --batch 0 --ceiling 11`. Мережа в пісочниці йде лише через проксі, а `fetch` у Node без цієї змінної його ігнорує; без неї `funnel.mjs` відмовляє кодом 2, а дочірні процеси отримують її разом зі змінними проксі. `GH_TOKEN` — окремий токен GitHub для `gh pr view` на публічному репозиторії, не особистий. Хуків і локальних MCP-серверів у цій установці немає.
 
 `scripts/eval/claude-sandbox.json` (PR 1):
 

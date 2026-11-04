@@ -11,7 +11,7 @@ import { planBatch } from './lib/batches.mjs';
 import { loadCatalog } from './lib/catalog.mjs';
 import { chooseExecutor, withoutHost } from './lib/executors.mjs';
 import { parseKeys } from './lib/records.mjs';
-import { runBatch, runPreflight } from './lib/runner.mjs';
+import { proxyRefusal, runBatch, runPreflight } from './lib/runner.mjs';
 import { checkLabels } from './lib/selection.mjs';
 
 const USAGE = `Usage: node scripts/eval/funnel.mjs --keys <file> --batch <n> --ceiling <usd> [--labels a,b] [--verify-model <id> --verify-route <id>] [--judges m:route,...] [--repo <dir>] [--allow-dirty]
@@ -175,6 +175,12 @@ async function main(argv) {
     return 2;
   }
   const paths = pathsOf(args);
+  if (args.command === 'note-spend') return noteSpendCommand(args, paths);
+  const refusal = proxyRefusal(process.env);
+  if (refusal !== null) {
+    process.stderr.write(`${refusal}\n`);
+    return 2;
+  }
   // A refusal is exit 2; what goes wrong inside a run is not caught here, so it does not look like a refusal.
   let prepared;
   try {
@@ -185,7 +191,6 @@ async function main(argv) {
   }
   if (args.command === 'preflight') return preflightCommand(args, paths);
   if (args.command === 'endpoints') return endpointsCommand(args, paths);
-  if (args.command === 'note-spend') return noteSpendCommand(args, paths);
   return batchCommand(args, prepared, paths);
 }
 
