@@ -131,6 +131,31 @@ describe('proxyRefusal', () => {
 });
 
 describe('childEnv', () => {
+  it('hands git its settings for the proxy, and no other git variable', () => {
+    const sandboxed = {
+      ...base,
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'http.proxyauthmethod',
+      GIT_CONFIG_VALUE_0: 'basic',
+      GIT_CONFIG_PARAMETERS: "'http.proxyauthmethod=basic'",
+      GIT_DIR: '/elsewhere',
+      GIT_CONFIG: 'not-a-prefix-match',
+    };
+    expect(childEnv(run(), keys, sandboxed)).toEqual({
+      PATH: '/bin',
+      HOME: '/home/u',
+      GH_TOKEN: 'gh-token',
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'http.proxyauthmethod',
+      GIT_CONFIG_VALUE_0: 'basic',
+      GIT_CONFIG_PARAMETERS: "'http.proxyauthmethod=basic'",
+      OPENROUTER_API_KEY: KEY,
+      AI_REVIEW_MODEL: 'm-find',
+      AI_REVIEW_OPENROUTER_ONLY: 'alibaba',
+      AI_REVIEW_RECORD_META: '{"batch":3,"label":"a","draw":1}',
+    });
+  });
+
   it('hands the proxy to the child, and still no other route key', () => {
     const proxied = {
       ...base,
@@ -442,6 +467,19 @@ describe('runPreflight', () => {
     ]);
     expect(calls[0].env).toEqual({ PATH: '/bin', HOME: '/home/u', GH_TOKEN: 'gh-token' });
     expect(calls[0].cwd).toBe('/repo');
+  });
+
+  it('hands git its settings for the proxy, since a head may have to be fetched', async () => {
+    const { spawnRun, calls } = answering(all);
+    await runPreflight({ catalog: pcatalog, spawnRun, repo: '/repo', base: { ...base, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.proxyauthmethod', GIT_CONFIG_VALUE_0: 'basic' } });
+    expect(calls[0].env).toEqual({
+      PATH: '/bin',
+      HOME: '/home/u',
+      GH_TOKEN: 'gh-token',
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'http.proxyauthmethod',
+      GIT_CONFIG_VALUE_0: 'basic',
+    });
   });
 
   it('keeps everything when nothing is sent as diff only', async () => {
