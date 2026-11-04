@@ -9,7 +9,8 @@
     },
     "2": {
       "defects": [
-        "D1"
+        "D1",
+        "D5"
       ],
       "findings": 4,
       "pr": "418"
@@ -25,7 +26,8 @@
   "claude-haiku-5-5": {
     "1": {
       "defects": [
-        "D4"
+        "D4",
+        "D5"
       ],
       "findings": 7,
       "pr": "418"
