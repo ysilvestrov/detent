@@ -253,7 +253,10 @@ export function parseFindTuning(env: Record<string, string | undefined>): { maxT
   const tuning: { maxTokens?: number; reasoning?: string } = {};
   const maxTokens = env.AI_REVIEW_FIND_MAX_TOKENS;
   if (maxTokens !== undefined) {
-    if (!/^[1-9]\d*$/.test(maxTokens)) return { error: 'AI_REVIEW_FIND_MAX_TOKENS must be a positive whole number' };
+    // A number past the safe range turns into another number, or into Infinity, which a request sends as null.
+    if (!/^[1-9]\d*$/.test(maxTokens) || !Number.isSafeInteger(Number(maxTokens))) {
+      return { error: 'AI_REVIEW_FIND_MAX_TOKENS must be a positive whole number' };
+    }
     tuning.maxTokens = Number(maxTokens);
   }
   const reasoning = env.AI_REVIEW_FIND_REASONING;

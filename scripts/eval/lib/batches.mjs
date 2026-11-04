@@ -31,8 +31,9 @@ export function savedFindings(lines) {
   const saved = new Map();
   for (const line of lines) {
     if (line.type !== 'run' || typeof line.key !== 'string' || !isScorable(line) || !line.findingsFile) continue;
-    const [, mode, label, pr, draw] = line.key.split(SEP);
-    if (mode === 'find') saved.set(`${label}/${pr}/${draw}`, line.findingsFile);
+    const [batch, mode, label, pr, draw] = line.key.split(SEP);
+    // A second try is measured apart: its findings never stand in for a find of the 8000 limit.
+    if (mode === 'find' && SECOND_TRY[batch] === undefined) saved.set(`${label}/${pr}/${draw}`, line.findingsFile);
   }
   return saved;
 }
@@ -42,8 +43,8 @@ export function startedFinds(lines) {
   const started = new Set();
   for (const line of lines) {
     if (typeof line.key !== 'string') continue;
-    const [, mode, label, pr, draw] = line.key.split(SEP);
-    if (mode === 'find') started.add(`${label}/${pr}/${draw}`);
+    const [batch, mode, label, pr, draw] = line.key.split(SEP);
+    if (mode === 'find' && SECOND_TRY[batch] === undefined) started.add(`${label}/${pr}/${draw}`);
   }
   return started;
 }

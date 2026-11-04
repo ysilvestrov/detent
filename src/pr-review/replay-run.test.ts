@@ -326,6 +326,15 @@ describe('replay executor pinning', () => {
     expect(bodies).toEqual([]);
   });
 
+  it('refuses a limit too large to send with code 2 and no model call', async () => {
+    const { fetchFn, bodies } = makeFetch();
+    const { code, err } = await replay({}, { fetchFn, env: { OPENAI_API_KEY: KEY, AI_REVIEW_FIND_MAX_TOKENS: '9'.repeat(309) } });
+
+    expect(code).toBe(2);
+    expect(err.join('\n')).toContain('AI_REVIEW_FIND_MAX_TOKENS must be a positive whole number');
+    expect(bodies).toEqual([]);
+  });
+
   it('refuses an effort it does not know with code 2 and no model call', async () => {
     const { fetchFn, bodies } = makeFetch();
     const { code, err } = await replay({}, { fetchFn, env: { OPENROUTER_API_KEY: KEY, AI_REVIEW_FIND_REASONING: 'lowest' } });

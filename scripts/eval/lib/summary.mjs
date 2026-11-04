@@ -313,13 +313,15 @@ export function secondTryRows({ lines, scores, catalog }) {
     const { findMaxTokens, findReasoning } = SECOND_TRY[batchOf(line)];
     const setting = findReasoning === null ? `limit ${findMaxTokens}` : `limit 8000, reasoning ${findReasoning}`;
     const id = [labelOf(line), setting].join(SEP);
-    if (!rows.has(id)) rows.set(id, { label: labelOf(line), setting, runs: 0, broken: 0, maxOutput: 0, reasoning: null, paidUsd: 0, scored: [] });
+    if (!rows.has(id)) rows.set(id, { label: labelOf(line), setting, runs: 0, broken: 0, maxOutput: 0, reasoning: null, paidUsd: 0, unpriced: 0, scored: [] });
     return rows.get(id);
   };
   for (const line of lines.filter(isSecondTry)) {
     if (line.type === 'call') {
       const row = rowOf(line);
-      row.paidUsd += callUsd(line, catalog).usd;
+      const cost = callUsd(line, catalog);
+      row.paidUsd += cost.usd;
+      if (cost.source === 'unpriced') row.unpriced += 1;
       if (line.contentLength === 0 || BROKEN_FINISH.includes(line.finishReason)) row.broken += 1;
       row.maxOutput = Math.max(row.maxOutput, line.usage?.completion_tokens ?? 0);
       const reasoning = line.usage?.completion_tokens_details?.reasoning_tokens;

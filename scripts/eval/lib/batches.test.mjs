@@ -425,8 +425,15 @@ describe('planBatch: the second try', () => {
 
   it('estimates the whole limit: $0.40 under 32 000 tokens, $0.10 under 8000', () => {
     const cheap = { ...dropped, candidates: dropped.candidates.map((c) => (c.label === 'kimi-k3.1-pro' ? { ...c, price: { input: 0, output: 12.5 } } : c)) };
-    expect(plan({ batch: 107, catalog: cheap, labels })[0].estimateUsd).toBeCloseTo(0.4);
-    expect(plan({ batch: 108, catalog: cheap, labels })[0].estimateUsd).toBeCloseTo(0.1);
+    expect(plan({ batch: 107, catalog: cheap, labels })[0].estimateUsd).toBe(0.4);
+    expect(plan({ batch: 108, catalog: cheap, labels })[0].estimateUsd).toBe(0.1);
+  });
+
+  it('never hands its findings to a batch of the 8000 limit', () => {
+    const line = (batch) => ({ type: 'run', key: `${batch}|find|a|418|1`, findingsFile: `findings/${batch}.json`, exit: 0, error: null, results: [], attempt: 1 });
+    expect([...savedFindings([line(3), line(107)]).entries()]).toEqual([['a/418/1', 'findings/3.json']]);
+    expect(savedFindings([line(107)]).size).toBe(0);
+    expect(startedFinds([line(108)]).size).toBe(0);
   });
 
   it('keeps two settings of one draw apart in the record', () => {
