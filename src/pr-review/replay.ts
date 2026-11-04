@@ -229,16 +229,39 @@ export function stageExtraBody(p: {
   only: string | undefined;
   cacheOff: boolean;
   cacheOffModels: string | undefined;
+  reasoning?: string | undefined;
 }): Record<string, unknown> | undefined {
   const only = parsePin(p.only);
   const cacheOff = cacheWritesOff(p);
-  if (only === null && !cacheOff) return p.provider.extraBody;
+  if (only === null && !cacheOff && p.reasoning === undefined) return p.provider.extraBody;
   const body: Record<string, unknown> = { ...p.provider.extraBody };
   if (only !== null) {
     body.provider = { ...(p.provider.extraBody?.provider as object | undefined), only, allow_fallbacks: false };
   }
   if (cacheOff) body.prompt_cache_options = { mode: 'explicit' };
+  if (p.reasoning !== undefined) body.reasoning = { effort: p.reasoning };
   return body;
+}
+
+const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high'];
+
+/**
+ * The find stage's settings for the second try at the models cut by the limit, from `AI_REVIEW_FIND_MAX_TOKENS` and
+ * `AI_REVIEW_FIND_REASONING`. Replay only: the review in CI has neither.
+ */
+export function parseFindTuning(env: Record<string, string | undefined>): { maxTokens?: number; reasoning?: string } | { error: string } {
+  const tuning: { maxTokens?: number; reasoning?: string } = {};
+  const maxTokens = env.AI_REVIEW_FIND_MAX_TOKENS;
+  if (maxTokens !== undefined) {
+    if (!/^[1-9]\d*$/.test(maxTokens)) return { error: 'AI_REVIEW_FIND_MAX_TOKENS must be a positive whole number' };
+    tuning.maxTokens = Number(maxTokens);
+  }
+  const reasoning = env.AI_REVIEW_FIND_REASONING;
+  if (reasoning !== undefined) {
+    if (!REASONING_EFFORTS.includes(reasoning)) return { error: `AI_REVIEW_FIND_REASONING must be one of ${REASONING_EFFORTS.join(', ')}` };
+    tuning.reasoning = reasoning;
+  }
+  return tuning;
 }
 
 type RecordMeta = Pick<RunLine, 'batch' | 'label' | 'draw'>;
@@ -297,6 +320,13 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
     find: runsFind ? parsePin(io.env.AI_REVIEW_OPENROUTER_ONLY) : null,
     verify: runsVerify ? parsePin(io.env.AI_REVIEW_VERIFY_OPENROUTER_ONLY) : null,
   };
+  const parsedTuning = parseFindTuning(io.env);
+  if ('error' in parsedTuning) return usage(parsedTuning.error);
+  const findTuning = parsedTuning;
+  // A setting for a find this run does not make would be silently ignored, and the run would not be what was asked for.
+  if (!runsFind && (findTuning.maxTokens !== undefined || findTuning.reasoning !== undefined)) {
+    return usage('AI_REVIEW_FIND_MAX_TOKENS and AI_REVIEW_FIND_REASONING need a run that finds');
+  }
 
   // `--context-only` never calls a model, so it needs neither a provider nor a key.
   // `verifyModel` is null when the run stops before the verify stage.
@@ -324,6 +354,9 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
       if (pins[stage] !== null && selection.provider.id !== 'openrouter') {
         return usage(`${name} works only with the openrouter provider, not ${selection.provider.id}`);
       }
+    }
+    if (findTuning.reasoning !== undefined && selection.provider.id !== 'openrouter') {
+      return usage(`AI_REVIEW_FIND_REASONING works only with the openrouter provider, not ${selection.provider.id}`);
     }
   }
   const cacheOff = io.env.AI_REVIEW_CACHE === 'off';
@@ -417,7 +450,15 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
           }
         : {}),
       model,
-      extraBody: stageExtraBody({ provider, model, only: only?.join(','), cacheOff, cacheOffModels: io.env.AI_REVIEW_CACHE_OFF_MODELS }),
+      extraBody: stageExtraBody({
+        provider,
+        model,
+        only: only?.join(','),
+        cacheOff,
+        cacheOffModels: io.env.AI_REVIEW_CACHE_OFF_MODELS,
+        reasoning: stage === 'find' ? findTuning.reasoning : undefined,
+      }),
+      ...(stage === 'find' && findTuning.maxTokens !== undefined ? { maxCompletionTokens: findTuning.maxTokens } : {}),
     };
   };
 

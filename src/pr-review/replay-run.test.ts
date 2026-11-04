@@ -284,6 +284,66 @@ describe('replay executor pinning', () => {
     expect(readRecord(path).at(-1)).toMatchObject({ only: { find: ['moonshotai'], verify: ['openai', 'azure'] }, cacheMode: 'off' });
   });
 
+  it('gives the find alone the limit and the reasoning effort it was asked for', async () => {
+    const { fetchFn, bodies } = makeFetch();
+    const env = {
+      OPENROUTER_API_KEY: KEY,
+      AI_REVIEW_MODEL: 'f/model',
+      AI_REVIEW_VERIFY_MODEL: 'v/model',
+      AI_REVIEW_FIND_MAX_TOKENS: '32000',
+      AI_REVIEW_FIND_REASONING: 'low',
+    };
+    const { code } = await replay({}, { fetchFn, env });
+
+    expect(code).toBe(0);
+    expect([bodyOf(bodies[0]!).max_completion_tokens, bodyOf(bodies[0]!).reasoning]).toEqual([32000, { effort: 'low' }]);
+    expect([bodyOf(bodies[1]!).max_completion_tokens, bodyOf(bodies[1]!).reasoning]).toEqual([8000, undefined]);
+  });
+
+  it('sends neither setting and the usual limit when none was asked for', async () => {
+    const { fetchFn, bodies } = makeFetch();
+    const env = { OPENROUTER_API_KEY: KEY, AI_REVIEW_MODEL: 'f/model', AI_REVIEW_VERIFY_MODEL: 'v/model' };
+    await replay({}, { fetchFn, env });
+
+    expect([bodyOf(bodies[0]!).max_completion_tokens, bodyOf(bodies[0]!).reasoning]).toEqual([8000, undefined]);
+  });
+
+  it('refuses a reasoning effort outside openrouter with code 2 and no model call', async () => {
+    const { fetchFn, bodies } = makeFetch();
+    const { code, err } = await replay({}, { fetchFn, env: { OPENAI_API_KEY: KEY, AI_REVIEW_FIND_REASONING: 'low' } });
+
+    expect(code).toBe(2);
+    expect(err.join('\n')).toContain('AI_REVIEW_FIND_REASONING works only with the openrouter provider, not openai');
+    expect(bodies).toEqual([]);
+  });
+
+  it('refuses a limit that is not a positive whole number with code 2 and no model call', async () => {
+    const { fetchFn, bodies } = makeFetch();
+    const { code, err } = await replay({}, { fetchFn, env: { OPENAI_API_KEY: KEY, AI_REVIEW_FIND_MAX_TOKENS: '32k' } });
+
+    expect(code).toBe(2);
+    expect(err.join('\n')).toContain('AI_REVIEW_FIND_MAX_TOKENS must be a positive whole number');
+    expect(bodies).toEqual([]);
+  });
+
+  it('refuses an effort it does not know with code 2 and no model call', async () => {
+    const { fetchFn, bodies } = makeFetch();
+    const { code, err } = await replay({}, { fetchFn, env: { OPENROUTER_API_KEY: KEY, AI_REVIEW_FIND_REASONING: 'lowest' } });
+
+    expect(code).toBe(2);
+    expect(err.join('\n')).toContain('AI_REVIEW_FIND_REASONING must be one of none, minimal, low, medium, high');
+    expect(bodies).toEqual([]);
+  });
+
+  it('refuses a find setting on a run that does not find', async () => {
+    const { fetchFn, bodies } = makeFetch();
+    const { code, err } = await replay({ contextOnly: true }, { fetchFn, env: { AI_REVIEW_FIND_MAX_TOKENS: '32000' } });
+
+    expect(code).toBe(2);
+    expect(err.join('\n')).toContain('AI_REVIEW_FIND_MAX_TOKENS and AI_REVIEW_FIND_REASONING need a run that finds');
+    expect(bodies).toEqual([]);
+  });
+
   it('refuses a pin outside openrouter with code 2 and no model call', async () => {
     const { fetchFn, bodies } = makeFetch();
     const { code, err } = await replay({}, { fetchFn, env: { OPENAI_API_KEY: KEY, AI_REVIEW_OPENROUTER_ONLY: 'x' } });

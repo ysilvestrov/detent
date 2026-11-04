@@ -53,6 +53,8 @@ export interface OpenAiDeps {
   providerName?: string;
   /** Extra top-level request fields, appended after the standard ones. */
   extraBody?: Record<string, unknown>;
+  /** The output limit of a call that names none. Defaults to DEFAULT_MAX_COMPLETION_TOKENS. */
+  maxCompletionTokens?: number;
   /** Called with every HTTP 200 response, including an empty completion that is about to throw and a body that could not be read (all-null info). */
   onResponse?: (info: CallInfo) => void;
 }
@@ -71,7 +73,7 @@ export async function callStructured(
   deps: OpenAiDeps,
   messages: ChatMessage[],
   format: JsonSchemaFormat,
-  maxCompletionTokens: number = DEFAULT_MAX_COMPLETION_TOKENS,
+  maxCompletionTokens: number = deps.maxCompletionTokens ?? DEFAULT_MAX_COMPLETION_TOKENS,
 ): Promise<{ content: string; usage: Usage }> {
   try {
     return await request(deps, messages, format, maxCompletionTokens);
