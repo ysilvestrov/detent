@@ -57,6 +57,16 @@ describe('priceOf', () => {
   });
 });
 
+describe('the OpenAI pricing page, 2026-11-04', () => {
+  it.each([
+    ['gpt-6.1-terra', { input: 1, cachedInput: 0.05, cacheWrite: 1.25, output: 5 }],
+    ['gpt-6.1-sol', { input: 2, cachedInput: 0.1, cacheWrite: 2.5, output: 10 }],
+    ['gpt-6-astra', { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 }],
+  ])('prices %s with its cache read and its 30-minute write', (label, price) => {
+    expect(byLabel(label).price).toEqual(price);
+  });
+});
+
 describe('the cached prices of the direct OpenAI models', () => {
   const cachedFind = { type: 'call', model: 'gpt-5.6-sol', usage: { prompt_tokens: 41400, completion_tokens: 4600, prompt_tokens_details: { cached_tokens: 40000 } } };
 

@@ -606,17 +606,21 @@ describe('summarize: a child that died before it wrote its line', () => {
   it('counts for the pair its key names', () => {
     const clean = run({ batch: 7, mode: 'verify', verifyModel: 'j2', key: '7|verify|alpha|418|2|j2', draw: 2 });
     const rows = summarize({ lines: [dead('j1'), clean], catalog, scores: noScores, cacheRuleApplies: false });
-    expect(rows.map((r) => [r.judge, r.brokenCalls, r.composite])).toEqual([['j1', 1, true], ['j2', 0, false]]);
+    expect(rows.map((r) => [r.judge, r.brokenCalls, r.composite])).toEqual([['j1', 0, true], ['j2', 0, false]]);
   });
 
   it('takes the stripped id from the key too', () => {
     const [row] = summarize({ lines: [dead('openai/gpt-5.5')], catalog, scores: noScores, cacheRuleApplies: false });
-    expect([row.judge, row.brokenCalls]).toEqual(['gpt-5.5', 1]);
+    expect([row.judge, row.brokenCalls]).toEqual(['gpt-5.5', 0]);
   });
 });
 
 describe('summarize: what breaks a pair', () => {
   const brokenOf = (lines) => rowOf(summarize({ lines, catalog, scores: noScores, cacheRuleApplies: false }), 'alpha').brokenCalls;
+
+  it('does not count a run that failed before any answer', () => {
+    expect(brokenOf([run({ exit: 5, error: 'git fetch origin pull/895/head failed: Proxy CONNECT aborted' })])).toBe(0);
+  });
 
   it('counts a run that failed with content and stop', () => {
     expect(brokenOf([call({}), run({ exit: 5, error: 'the answer did not parse' })])).toBe(1);
@@ -643,13 +647,13 @@ describe('summarize: what breaks a pair', () => {
 
   it('counts a failed run of the judge on its own row only', () => {
     const judged = (judge, over) => run({ batch: 7, mode: 'verify', verifyModel: judge, key: `7|verify|alpha|418|1|${judge}`, ...over });
-    const lines = [judged('j1', { exit: 5, error: 'boom' }), judged('j2', {})];
+    const lines = [call({ stage: 'verify', key: '7|verify|alpha|418|1|j1', requestedModel: 'j1' }), judged('j1', { exit: 5, error: 'no parse' }), judged('j2', {})];
     expect(summarize({ lines, catalog, scores: noScores, cacheRuleApplies: false }).map((r) => r.brokenCalls)).toEqual([1, 0]);
   });
 
   it('counts a failed find on every row of the finder', () => {
     const judged = (judge) => run({ batch: 7, mode: 'verify', verifyModel: judge, key: `7|verify|alpha|418|1|${judge}` });
-    const lines = [run({ exit: 5, error: 'no parse' }), judged('j1'), judged('j2')];
+    const lines = [call({}), run({ exit: 5, error: 'no parse' }), judged('j1'), judged('j2')];
     expect(summarize({ lines, catalog, scores: noScores, cacheRuleApplies: false }).map((r) => r.brokenCalls)).toEqual([1, 1]);
   });
 });
