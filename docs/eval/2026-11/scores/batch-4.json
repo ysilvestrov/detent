@@ -1,0 +1,111 @@
+{
+  "grok-4.7": {
+    "2": {
+      "defects": [
+        "D1",
+        "D2",
+        "D3",
+        "D4",
+        "D5"
+      ],
+      "findings": 9,
+      "pr": "418"
+    },
+    "3": {
+      "defects": [
+        "D1",
+        "D2",
+        "D3",
+        "D4"
+      ],
+      "findings": 6,
+      "pr": "418"
+    }
+  },
+  "gpt-6.1-terra": {
+    "2": {
+      "defects": [
+        "D1",
+        "D2",
+        "D3",
+        "D4",
+        "D5"
+      ],
+      "findings": 11,
+      "pr": "418"
+    },
+    "3": {
+      "defects": [
+        "D1",
+        "D2",
+        "D3",
+        "D4",
+        "D5"
+      ],
+      "findings": 12,
+      "pr": "418"
+    }
+  },
+  "gemini-4-argon": {
+    "2": {
+      "defects": [
+        "D1",
+        "D3",
+        "D4"
+      ],
+      "findings": 5,
+      "pr": "418"
+    },
+    "3": {
+      "defects": [
+        "D1",
+        "D3",
+        "D4"
+      ],
+      "findings": 5,
+      "pr": "418"
+    }
+  },
+  "gpt-6.1-sol": {
+    "2": {
+      "defects": [
+        "D1",
+        "D2",
+        "D3",
+        "D4"
+      ],
+      "findings": 10,
+      "pr": "418"
+    },
+    "3": {
+      "defects": [
+        "D1",
+        "D2",
+        "D3",
+        "D4"
+      ],
+      "findings": 8,
+      "pr": "418"
+    }
+  },
+  "claude-sonnet-5-5": {
+    "2": {
+      "defects": [
+        "D1",
+        "D3",
+        "D4",
+        "D5"
+      ],
+      "findings": 4,
+      "pr": "418"
+    },
+    "3": {
+      "defects": [
+        "D1",
+        "D4"
+      ],
+      "findings": 4,
+      "pr": "418"
+    }
+  }
+}
