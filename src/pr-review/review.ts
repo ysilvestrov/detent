@@ -5,7 +5,7 @@ import { buildReviewContext } from './context.js';
 import { runFind } from './find.js';
 import { applyGate, changedLineRanges, findingKey } from './gate.js';
 import { decideMode, incrementalScope, reconcileFindings, type ClosedFinding } from './incremental.js';
-import type { Provider } from './providers.js';
+import { cacheOffByDefault, stageBody, type Provider } from './providers.js';
 import { renderBody, type OpenFinding } from './render.js';
 import type { FilePatterns, ReviewSettings } from './settings.js';
 import { parseState, toStored, type StoredFinding } from './state.js';
@@ -453,9 +453,12 @@ async function runReviewOnce(pr: PrContext, run: RunSettings, deps: ReviewDeps):
     endpoint: run.provider.endpoint,
     apiKey: run.apiKey,
     providerName: run.provider.name,
-    extraBody: run.provider.extraBody,
     fetchFn: deps.openaiFetch,
   };
+
+  const only = run.settings.configured.openrouterOnly;
+  const bodyOf = (model: string, pin: string[] | undefined) =>
+    stageBody(run.provider, { only: pin, cacheOff: cacheOffByDefault(run.provider, model) });
 
   // Deliberately runs in `full` mode too, not only incremental: the mode decides
   // what this run re-reads, never what it forgets. A published finding is retired
@@ -484,7 +487,7 @@ async function runReviewOnce(pr: PrContext, run: RunSettings, deps: ReviewDeps):
     }
 
     const found = await runFind(
-      { ...openaiDeps, model: run.findModel },
+      { ...openaiDeps, model: run.findModel, extraBody: bodyOf(run.findModel, only?.find) },
       {
         instructions: run.settings.findPrompt,
         context,
@@ -523,7 +526,7 @@ async function runReviewOnce(pr: PrContext, run: RunSettings, deps: ReviewDeps):
     requests.length === 0
       ? { results: [], usage: EMPTY_USAGE }
       : await verifyAll(
-          { ...openaiDeps, model: run.verifyModel },
+          { ...openaiDeps, model: run.verifyModel, extraBody: bodyOf(run.verifyModel, only?.verify) },
           {
             instructions: run.settings.verifyPrompt,
             requests,

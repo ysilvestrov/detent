@@ -4,36 +4,46 @@ import { ensureHeadCommit, formatContextBudget, resolveReplayArgs, resolveReplay
 
 describe('stageExtraBody', () => {
   it('pins OpenRouter to the named executors and forbids fallbacks', () => {
-    expect(stageExtraBody({ provider: PROVIDERS.openrouter, model: 'm', only: 'openai,azure', cacheOff: false, cacheOffModels: undefined })).toEqual({
+    expect(stageExtraBody({ provider: PROVIDERS.openrouter, model: 'm', only: 'openai,azure', cache: undefined, cacheOffModels: undefined })).toEqual({
       provider: { only: ['openai', 'azure'], allow_fallbacks: false, require_parameters: true },
     });
   });
 
   it('treats a blank pin as no pin', () => {
-    expect(stageExtraBody({ provider: PROVIDERS.openrouter, model: 'm', only: ' ', cacheOff: false, cacheOffModels: undefined })).toEqual({
+    expect(stageExtraBody({ provider: PROVIDERS.openrouter, model: 'm', only: ' ', cache: undefined, cacheOffModels: undefined })).toEqual({
       provider: { require_parameters: true },
     });
   });
 
   it('turns cache writes off for a model on the list', () => {
     expect(
-      stageExtraBody({ provider: PROVIDERS.openai, model: 'gpt-5.6-sol', only: undefined, cacheOff: true, cacheOffModels: 'gpt-5.6-sol, gpt-6.1-sol' }),
+      stageExtraBody({ provider: PROVIDERS.openai, model: 'gpt-5.6-sol', only: undefined, cache: 'off', cacheOffModels: 'gpt-5.6-sol, gpt-6.1-sol' }),
     ).toEqual({ prompt_cache_options: { mode: 'explicit' } });
   });
 
   it('combines the pin and the cache switch', () => {
-    expect(stageExtraBody({ provider: PROVIDERS.openrouter, model: 'gpt-5.6-sol', only: 'azure', cacheOff: true, cacheOffModels: 'gpt-5.6-sol' })).toEqual({
+    expect(stageExtraBody({ provider: PROVIDERS.openrouter, model: 'gpt-5.6-sol', only: 'azure', cache: 'off', cacheOffModels: 'gpt-5.6-sol' })).toEqual({
       provider: { only: ['azure'], allow_fallbacks: false, require_parameters: true },
       prompt_cache_options: { mode: 'explicit' },
     });
   });
 
-  it('leaves a model that is not on the list alone', () => {
-    expect(stageExtraBody({ provider: PROVIDERS.openai, model: 'gpt-5.5', only: undefined, cacheOff: true, cacheOffModels: 'gpt-5.6-sol' })).toBeUndefined();
+  it('turns writes off by default for a model the provider names', () => {
+    expect(stageExtraBody({ provider: PROVIDERS.openai, model: 'gpt-5.6-sol', only: undefined, cache: undefined, cacheOffModels: undefined })).toEqual({
+      prompt_cache_options: { mode: 'explicit' },
+    });
   });
 
-  it('turns nothing off when the list is not set', () => {
-    expect(stageExtraBody({ provider: PROVIDERS.openai, model: 'gpt-5.6-sol', only: undefined, cacheOff: true, cacheOffModels: undefined })).toBeUndefined();
+  it('keeps writes on with AI_REVIEW_CACHE=on, even for a model on either list', () => {
+    expect(stageExtraBody({ provider: PROVIDERS.openai, model: 'gpt-5.6-sol', only: undefined, cache: 'on', cacheOffModels: 'gpt-5.6-sol' })).toBeUndefined();
+  });
+
+  it('leaves a model that is not on the list alone', () => {
+    expect(stageExtraBody({ provider: PROVIDERS.openai, model: 'gpt-5.5', only: undefined, cache: 'off', cacheOffModels: 'gpt-5.6-sol' })).toBeUndefined();
+  });
+
+  it('adds nothing when the list is not set', () => {
+    expect(stageExtraBody({ provider: PROVIDERS.openai, model: 'gpt-5.5', only: undefined, cache: 'off', cacheOffModels: undefined })).toBeUndefined();
   });
 });
 

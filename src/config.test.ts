@@ -157,6 +157,28 @@ describe('prReview', () => {
     const prReview = { provider: 'openrouter', include: ['src/**'], ignore: ['a'], bodyExclude: ['b'], bodyInclude: ['c'], findModel: 'f', verifyModel: 'v' };
     expect(pr(prReview)).toEqual({ ok: true, config: { ...DEFAULTS, prReview } });
   });
+  test('a valid openrouterOnly is kept', () => {
+    const prReview = { openrouterOnly: { find: ['moonshotai'], verify: ['openai', 'azure'] } };
+    expect(pr(prReview)).toEqual({ ok: true, config: { ...DEFAULTS, prReview } });
+  });
+  test('openrouterOnly may name one stage', () => {
+    const prReview = { openrouterOnly: { verify: ['openai'] } };
+    expect(pr(prReview)).toEqual({ ok: true, config: { ...DEFAULTS, prReview } });
+  });
+  test('an unknown key in openrouterOnly is named', () => {
+    expect(pr({ openrouterOnly: { judge: ['a'] } })).toEqual({ ok: false, error: 'detent.json: unknown key "judge" in "prReview.openrouterOnly"' });
+  });
+  test('openrouterOnly must be an object', () => {
+    expect(pr({ openrouterOnly: ['a'] })).toEqual({ ok: false, error: 'detent.json: "prReview.openrouterOnly" must be an object' });
+  });
+  test.each([
+    ['an empty list', []],
+    ['a blank name', ['']],
+    ['a string', 'openai'],
+    ['a number in the list', [1]],
+  ])('openrouterOnly.find refuses %s', (_name, find) => {
+    expect(pr({ openrouterOnly: { find } })).toEqual({ ok: false, error: 'detent.json: "prReview.openrouterOnly.find" must be a non-empty array of non-empty strings' });
+  });
   test('an absent prReview leaves no field', () => {
     const r = parseConfig('{}');
     expect(r.ok && 'prReview' in r.config).toBe(false);

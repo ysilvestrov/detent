@@ -179,6 +179,13 @@ describe('pr-review in CI', () => {
     expect(h.calls).toEqual([]);
   });
 
+  it('exits 2 when openrouterOnly is set for another provider', async () => {
+    const h = harness({ config: { prReview: { openrouterOnly: { find: ['openai'] } } } });
+    expect(await prReview([], h.io)).toBe(EXIT.usage);
+    expect(h.err.join('\n')).toContain('"prReview.openrouterOnly" works only with the openrouter provider, not openai');
+    expect(h.calls).toEqual([]);
+  });
+
   it('reviews a PR with an empty description: body null reaches the model as "(no description)"', async () => {
     const h = harness({ event: { body: null } });
     expect(await prReview([], h.io)).toBe(EXIT.ok);
