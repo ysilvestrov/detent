@@ -1,0 +1,33 @@
+{
+  "mimo-v2.6-pro": {
+    "2": {
+      "defects": [
+        "D1",
+        "D3",
+        "D4",
+        "D5"
+      ],
+      "findings": 9,
+      "pr": "418"
+    },
+    "3": {
+      "defects": [
+        "D1",
+        "D3",
+        "D4",
+        "D5"
+      ],
+      "findings": 9,
+      "pr": "418"
+    }
+  },
+  "hy4-preview": {
+    "2": {
+      "defects": [
+        "D1"
+      ],
+      "findings": 2,
+      "pr": "418"
+    }
+  }
+}
