@@ -85,9 +85,13 @@ export interface Price {
  * actually checked are listed: an unknown model prints tokens and no dollars,
  * because a confidently wrong number is worse than an admitted gap.
  *
- * Not modelled: the >272k-input-token tier (2x input / 1.5x output) and Haiku's
- * tier over 100k tokens. Our CONTEXT_BUDGET is 240 000 *characters* (~60k tokens),
- * so a request cannot reach them; if that budget grows, this needs a tier.
+ * Not modelled: the >272k-input-token tier (2x input / 1.5x output). Our
+ * CONTEXT_BUDGET is 240 000 *characters* (~60k tokens), so a request cannot
+ * reach it; if that budget ever grows past ~1M characters, this needs a tier.
+ *
+ * `claude-haiku-5-5` is left out on purpose: its price rises five times over 100k
+ * input tokens, and a verify call sends a whole file with no budget, so a flat row
+ * could understate it.
  *
  * These numbers are derived, the token counts are ground truth. Validate the
  * first production run's footer against the billing dashboard delta — if they
@@ -102,7 +106,6 @@ export const PRICES: Record<string, Price> = {
   'gpt-6.1-sol': { input: 2, cachedInput: 0.1, cacheWrite: 2.5, output: 10 },
   'gpt-6-astra': { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 },
   'claude-sonnet-5-5': { input: 2, output: 10 },
-  'claude-haiku-5-5': { input: 0.1, output: 0.5 },
   'claude-opus-5-5': { input: 4, output: 20 },
   'claude-fable-5-1': { input: 10, output: 50 },
 };

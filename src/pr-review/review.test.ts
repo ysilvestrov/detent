@@ -418,6 +418,26 @@ const PR: PrContext = {
   githubToken: 't',
 };
 
+/** A model that answers the find, then the verify, and keeps what each request sent. */
+function captureFindThenVerify(): { bodies: Array<Record<string, unknown>>; capture: typeof fetch } {
+  const bodies: Array<Record<string, unknown>> = [];
+  const answers = [
+    JSON.stringify({ findings: [FINDING] }),
+    JSON.stringify({ verdicts: [{ index: 1, verdict: 'confirmed', evidence: 'line 2 returns not_found' }] }),
+  ];
+  const capture = (async (_url: string, init?: RequestInit) => {
+    const content = answers[bodies.length];
+    bodies.push(JSON.parse(init!.body as string) as Record<string, unknown>);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content } }], usage: { prompt_tokens: 1000, completion_tokens: 100 } }),
+      text: async () => content,
+    } as unknown as Response;
+  }) as unknown as typeof fetch;
+  return { bodies, capture };
+}
+
 const RUN: RunSettings = {
   settings: { patterns: PATTERNS, findPrompt: 'instructions', verifyPrompt: 'instructions', scope: 'scope-1', configured: {} },
   provider: PROVIDERS.openai,
@@ -486,20 +506,7 @@ describe('runReview — each stage calls its own model', () => {
   });
 
   it('turns cache writes off for the default find and leaves the default verify alone', async () => {
-    const bodies: Array<Record<string, unknown>> = [];
-    const capture = (async (_url: string, init?: RequestInit) => {
-      bodies.push(JSON.parse(init!.body as string) as Record<string, unknown>);
-      const content =
-        bodies.length === 1
-          ? JSON.stringify({ findings: [FINDING] })
-          : JSON.stringify({ verdicts: [{ index: 1, verdict: 'confirmed', evidence: 'line 2 returns not_found' }] });
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ choices: [{ message: { content } }], usage: { prompt_tokens: 1000, completion_tokens: 100 } }),
-        text: async () => content,
-      } as unknown as Response;
-    }) as unknown as typeof fetch;
+    const { bodies, capture } = captureFindThenVerify();
 
     await runReview(PR, { ...RUN, findModel: 'gpt-5.6-sol', verifyModel: 'gpt-5.5' }, deps({ openaiFetch: capture, githubFetch: githubFetch(null).fetchFn }));
 
@@ -508,20 +515,7 @@ describe('runReview — each stage calls its own model', () => {
   });
 
   it('pins each OpenRouter stage to its own executors from prReview.openrouterOnly', async () => {
-    const bodies: Array<Record<string, unknown>> = [];
-    const capture = (async (_url: string, init?: RequestInit) => {
-      bodies.push(JSON.parse(init!.body as string) as Record<string, unknown>);
-      const content =
-        bodies.length === 1
-          ? JSON.stringify({ findings: [FINDING] })
-          : JSON.stringify({ verdicts: [{ index: 1, verdict: 'confirmed', evidence: 'line 2 returns not_found' }] });
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ choices: [{ message: { content } }], usage: { prompt_tokens: 1000, completion_tokens: 100 } }),
-        text: async () => content,
-      } as unknown as Response;
-    }) as unknown as typeof fetch;
+    const { bodies, capture } = captureFindThenVerify();
 
     await runReview(
       PR,

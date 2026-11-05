@@ -223,6 +223,10 @@ describe('costUsd: cache writes', () => {
     expect(costUsd('claude-sonnet-5-5', { ...usage, cachedTokens: 1_000_000 })).toBeCloseTo(2, 6);
   });
 
+  it('leaves claude-haiku-5-5 unpriced, because its tier over 100k tokens has no row', () => {
+    expect(costUsd('claude-haiku-5-5', parseUsage({ prompt_tokens: 110_000, completion_tokens: 1000 }))).toBeNull();
+  });
+
   it('reads the write counter from the usage block', () => {
     expect(parseUsage({ prompt_tokens: 18649, prompt_tokens_details: { cache_write_tokens: 18646 } }).cacheWriteTokens).toBe(18646);
   });
