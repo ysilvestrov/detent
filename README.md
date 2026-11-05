@@ -281,6 +281,36 @@ fixed findings of the CI review in code that had already been through `cross-rev
 all, on five PRs after a verdict of 0 findings. It cost about $0.34 per PR with `cross-review`. Your
 numbers will differ.
 
+### Which models
+
+Measured on 2026-11-05 on one project, warsaw-beer-bot. Treat the numbers as evidence about that
+project, not as a ranking of the models: each comes from one or two PRs. Records, scores and the
+reasoning are in [`docs/eval/2026-11/report.md`](docs/eval/2026-11/report.md).
+
+| Provider | Profile | Find + verify | Defects published on PR #418, of 5, per run | On PR #930, of 3, per run | Corpus: published, false | First full review of #418 |
+|---|---|---|---|---|---|---|
+| `openai` | Best (the default) | `gpt-5.6-sol` + `gpt-5.5` | 3, 5, 4 | 2, 3, 2 | 17, 0 | $0.47 |
+| `openai` | Balanced, best value | `gpt-6.1-terra` + `gpt-6.1-terra` | 4, 4, 4 | 1, 1, 1 | 17, 0 | $0.09 |
+| `anthropic` | All three | `claude-sonnet-5-5` + `claude-sonnet-5-5` | 4, 3, 4 | 1, 1, 1 | 6, 0 | $0.25 |
+| `openrouter` | None | | | | | |
+
+- **What the cheap pair gives up.** `gpt-6.1-terra` + `gpt-6.1-terra` loses one defect in each run
+  on #418 and finds only one of three on #930. It costs about a fifth of the default.
+- **`claude-sonnet-5-5` publishes little on the corpus.** 6 findings against 17, and none on two of
+  its four PRs. It passes the admission rule, which asks for at least 3 and no false one.
+- **No OpenRouter row.** No pair went through both recall PRs and the corpus. `mimo-v2.6-pro` and
+  `kimi-k3.1-pro` found 3, 4, 4 on #418 at the find stage alone, but only with a higher output limit
+  or low reasoning, and `detent.json` has neither setting.
+- **The default prompts.** A run with them scored 4, 3, 4 on #418 and 16 findings with no false one
+  on the corpus. They differ from that project's prompts only by its name, some scope wording and
+  `{{reviewContext}}`, so this says little about them on your project.
+
+To use a pair other than the default, name it in `prReview`:
+
+```json
+{ "prReview": { "findModel": "gpt-6.1-terra", "verifyModel": "gpt-6.1-terra" } }
+```
+
 ### Connecting it
 
 1. Add the key of one provider as a repository secret.
@@ -319,6 +349,7 @@ scope.
 | `provider` | by the key that is set | `openai`, `anthropic` or `openrouter`. |
 | `findModel` | by provider | The model that finds. |
 | `verifyModel` | by provider | The model that verifies. |
+| `openrouterOnly` | none | OpenRouter only: `{"find": ["…"], "verify": ["…"]}`, the executors each stage may run on, with no fallback. With another provider it is exit 2. |
 
 **Settings count only from the base branch.** The config and the prompts are read from
 `refs/remotes/origin/<base>`, so a PR cannot change how it is reviewed itself, and a PR that adds
@@ -363,7 +394,8 @@ Reviews PR `<n>` locally and publishes nothing; it prints the findings and the s
 PR's data through `gh` and the files through `git show`, so a past head works too. Unlike a run in
 CI, it reads the config and the prompts from the working tree, so that settings can be measured
 before they are merged, and it honours `AI_REVIEW_MODEL`, `AI_REVIEW_VERIFY_MODEL` and `--provider`.
-Without a key it exits 2.
+Without a key it exits 2. `AI_REVIEW_CACHE=on` sends the request with cache writes left on, to measure
+them.
 
 ### Importing the code
 
@@ -372,15 +404,19 @@ interface**: pin the exact version of the package if you import it.
 
 ### Limits of the review
 
-- **Anthropic and OpenRouter are unmeasured.** A live `--replay` on one PR passed the schema on each
-  of the three providers (2026-11-03), which proves the transport and nothing about the quality of
-  the review. The numbers above come from the default OpenAI pair. A model outside the price table,
-  and any `openai/…` name on OpenRouter, shows tokens without dollars. Anthropic ignores
-  `reasoning_effort`. The price on OpenRouter depends on the route.
-- **Cache writes are not counted, so the spend line reads low on `gpt-5.6` models.** On a live run
-  all 18.6k input tokens of `gpt-5.6-sol` showed as 30-minute cache writes in the OpenAI dashboard.
-  Its page prices those at $5 per 1M, the table at the $4 input price: on that run $0.22 instead of
-  about $0.23. `gpt-5.5` has no such tariff, and its tokens showed as uncached.
+- **An empty review is not always a clean one.** A model can return an empty findings list and a
+  normal finish on a PR with known defects, and that reads as no problems found. In the measurements
+  `gemini-3.8-flash` did this. Check a model on such a PR first.
+- **The judge sees one file at a time.** It can answer `out_of_scope` on a real defect that spans
+  files, and such a finding is not published. Every judge measured did this at least once.
+- **Spend line.** OpenRouter's own figure is used when the response has one. Otherwise a model outside
+  the price table shows tokens without dollars. The table holds list prices, and the OpenAI bill can
+  come out lower: in the measurements it was $8.67 against about $14.03 at list, unexplained.
+  Anthropic ignores `reasoning_effort`.
+- **Paid cache writes are off for `gpt-5.6-sol`, `gpt-6.1-terra` and `gpt-6.1-sol` on `openai`.** A write
+  costs 25% over input and only an identical request reads it back: on a measured next head nothing
+  was read. So a rerun of the workflow on the same head pays the full price. Another model with a
+  write tariff, such as `gpt-6-astra`, keeps writing, and the spend line counts it.
 - **`.gitattributes`.** A PR that adds `* -diff` hides its diff from the reviewer, and the review
   comes out clean. The change to `.gitattributes` is visible in the PR.
 - **Rare cases carried over on purpose**, listed in the spec
