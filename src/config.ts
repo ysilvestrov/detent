@@ -11,6 +11,8 @@ export interface PrReviewConfig {
   bodyInclude?: string[];
   findModel?: string;
   verifyModel?: string;
+  /** The OpenRouter executors each stage may run on; a measured row reproduces only with the same pin. */
+  openrouterOnly?: { find?: string[]; verify?: string[] };
 }
 
 export interface Config {
@@ -48,7 +50,8 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 const PR_REVIEW_LIST_KEYS = ['include', 'ignore', 'bodyExclude', 'bodyInclude'] as const;
 const PR_REVIEW_MODEL_KEYS = ['findModel', 'verifyModel'] as const;
-const PR_REVIEW_KEYS: readonly string[] = ['provider', ...PR_REVIEW_LIST_KEYS, ...PR_REVIEW_MODEL_KEYS];
+const PR_REVIEW_KEYS: readonly string[] = ['provider', 'openrouterOnly', ...PR_REVIEW_LIST_KEYS, ...PR_REVIEW_MODEL_KEYS];
+const OPENROUTER_ONLY_KEYS = ['find', 'verify'] as const;
 
 function parsePrReview(v: unknown): { ok: true; value: PrReviewConfig } | { ok: false; error: string } {
   if (!isPlainObject(v)) return { ok: false, error: 'detent.json: "prReview" must be an object' };
@@ -78,6 +81,24 @@ function parsePrReview(v: unknown): { ok: true; value: PrReviewConfig } | { ok: 
       return { ok: false, error: `detent.json: "prReview.${key}" must be a non-empty string` };
     }
     out[key] = m;
+  }
+  if (Object.hasOwn(v, 'openrouterOnly')) {
+    const only = v.openrouterOnly;
+    if (!isPlainObject(only)) return { ok: false, error: 'detent.json: "prReview.openrouterOnly" must be an object' };
+    for (const key of Object.keys(only)) {
+      if (!(OPENROUTER_ONLY_KEYS as readonly string[]).includes(key)) {
+        return { ok: false, error: `detent.json: unknown key "${key}" in "prReview.openrouterOnly"` };
+      }
+    }
+    out.openrouterOnly = {};
+    for (const key of OPENROUTER_ONLY_KEYS) {
+      if (!Object.hasOwn(only, key)) continue;
+      const names = only[key];
+      if (!Array.isArray(names) || names.length === 0 || !names.every((x) => typeof x === 'string' && x !== '')) {
+        return { ok: false, error: `detent.json: "prReview.openrouterOnly.${key}" must be a non-empty array of non-empty strings` };
+      }
+      out.openrouterOnly[key] = [...(names as string[])];
+    }
   }
   return { ok: true, value: out };
 }

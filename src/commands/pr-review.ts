@@ -145,6 +145,10 @@ export async function prReview(argv: readonly string[], io: PrReviewIo): Promise
     return fail(EXIT.failed, message);
   }
   const { provider, apiKey } = selection;
+  // A pin is an OpenRouter request field; anywhere else it would be silently ignored, and the review would not be the one configured.
+  if (settings.configured.openrouterOnly !== undefined && provider.id !== 'openrouter') {
+    return fail(EXIT.usage, `"prReview.openrouterOnly" works only with the openrouter provider, not ${provider.id}`);
+  }
 
   const models = resolveModels(provider, settings.configured);
   if (!models.ok) return fail(EXIT.usage, models.error);

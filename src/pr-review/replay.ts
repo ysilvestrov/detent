@@ -12,7 +12,7 @@ import { buildReviewContext } from './context.js';
 import { runFind } from './find.js';
 import { applyGate, changedLineRanges } from './gate.js';
 import { NonRetryableError, type OpenAiDeps } from './openai.js';
-import { PROVIDER_IDS, isProviderId, resolveModels, selectProvider, type Provider, type ProviderId } from './providers.js';
+import { PROVIDER_IDS, cacheOffByDefault, isProviderId, resolveModels, selectProvider, stageBody, type Provider, type ProviderId } from './providers.js';
 import { openRecord, type RecordWriter, type RunLine } from './record.js';
 import { contextReader, filterReviewableFiles } from './review.js';
 import { checkFindingsPath, readFindings, saveFindings, type SavedFindings } from './saved-findings.js';
@@ -213,34 +213,29 @@ function parsePin(raw: string | undefined): string[] | null {
   return names.length === 0 ? null : names;
 }
 
-/** Whether a request to this model carries the switch that turns cache writes off. */
-function cacheWritesOff(p: { model: string; cacheOff: boolean; cacheOffModels: string | undefined }): boolean {
-  return p.cacheOff && splitList(p.cacheOffModels).includes(p.model);
+/**
+ * Whether a request to this model carries the switch that turns cache writes off. By default what the review in CI
+ * does; `AI_REVIEW_CACHE=off` adds the models in `AI_REVIEW_CACHE_OFF_MODELS`, `AI_REVIEW_CACHE=on` sends it for none.
+ */
+function cacheWritesOff(p: { provider: Provider; model: string; cache: string | undefined; cacheOffModels: string | undefined }): boolean {
+  if (p.cache === 'on') return false;
+  return cacheOffByDefault(p.provider, p.model) || (p.cache === 'off' && splitList(p.cacheOffModels).includes(p.model));
 }
 
 /**
- * The extra request fields one stage sends: the provider's own, the OpenRouter executor pin, and the
- * switch that turns cache writes off. The switch touches only models named in `cacheOffModels`, because
- * Azure answers `gpt-5.5` with a 400 on `prompt_cache_options` (spec 2026-11-03-pr-review-big-test-design.md, «Кеш»).
+ * The extra request fields one stage sends: `stageBody` and the reasoning setting. The cache switch touches only named
+ * models, because Azure answers `gpt-5.5` with a 400 on `prompt_cache_options` (spec 2026-11-03-pr-review-big-test-design.md, «Кеш»).
  */
 export function stageExtraBody(p: {
   provider: Provider;
   model: string;
   only: string | undefined;
-  cacheOff: boolean;
+  cache: string | undefined;
   cacheOffModels: string | undefined;
   reasoning?: string | undefined;
 }): Record<string, unknown> | undefined {
-  const only = parsePin(p.only);
-  const cacheOff = cacheWritesOff(p);
-  if (only === null && !cacheOff && p.reasoning === undefined) return p.provider.extraBody;
-  const body: Record<string, unknown> = { ...p.provider.extraBody };
-  if (only !== null) {
-    body.provider = { ...(p.provider.extraBody?.provider as object | undefined), only, allow_fallbacks: false };
-  }
-  if (cacheOff) body.prompt_cache_options = { mode: 'explicit' };
-  if (p.reasoning !== undefined) body.reasoning = { effort: p.reasoning };
-  return body;
+  const body = stageBody(p.provider, { only: parsePin(p.only), cacheOff: cacheWritesOff(p) });
+  return p.reasoning === undefined ? body : { ...body, reasoning: { effort: p.reasoning } };
 }
 
 const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high'];
@@ -320,8 +315,8 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
   const runsFind = args.verifyFrom === undefined && !args.contextOnly;
   const runsVerify = !args.findOnly && !args.contextOnly;
   const pins = {
-    find: runsFind ? parsePin(io.env.AI_REVIEW_OPENROUTER_ONLY) : null,
-    verify: runsVerify ? parsePin(io.env.AI_REVIEW_VERIFY_OPENROUTER_ONLY) : null,
+    find: runsFind ? (parsePin(io.env.AI_REVIEW_OPENROUTER_ONLY) ?? settings.configured.openrouterOnly?.find ?? null) : null,
+    verify: runsVerify ? (parsePin(io.env.AI_REVIEW_VERIFY_OPENROUTER_ONLY) ?? settings.configured.openrouterOnly?.verify ?? null) : null,
   };
   const parsedTuning = parseFindTuning(io.env);
   if ('error' in parsedTuning) return usage(parsedTuning.error);
@@ -355,14 +350,15 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
     // A stage that does not run has no pin to check, and its pin is not on the run line.
     for (const [name, stage] of [['AI_REVIEW_OPENROUTER_ONLY', 'find'], ['AI_REVIEW_VERIFY_OPENROUTER_ONLY', 'verify']] as const) {
       if (pins[stage] !== null && selection.provider.id !== 'openrouter') {
-        return usage(`${name} works only with the openrouter provider, not ${selection.provider.id}`);
+        const source = parsePin(io.env[name]) === null ? '"prReview.openrouterOnly"' : name;
+        return usage(`${source} works only with the openrouter provider, not ${selection.provider.id}`);
       }
     }
     if (findTuning.reasoning !== undefined && selection.provider.id !== 'openrouter') {
       return usage(`AI_REVIEW_FIND_REASONING works only with the openrouter provider, not ${selection.provider.id}`);
     }
   }
-  const cacheOff = io.env.AI_REVIEW_CACHE === 'off';
+  const cache = io.env.AI_REVIEW_CACHE;
 
   // These checks come before the first call: a file that cannot be written must not be found out after the money is spent.
   if (args.saveFindings !== undefined) {
@@ -407,7 +403,7 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
     only: pins,
     // 'off' only when a stage that ran sent the switch, so a run the list did not touch is not labelled as one that was.
     cacheMode: [runsFind ? chosen?.findModel : undefined, runsVerify ? chosen?.verifyModel : undefined].some(
-      (model) => model != null && cacheWritesOff({ model, cacheOff, cacheOffModels: io.env.AI_REVIEW_CACHE_OFF_MODELS }),
+      (model) => model != null && chosen !== null && cacheWritesOff({ provider: chosen.provider, model, cache, cacheOffModels: io.env.AI_REVIEW_CACHE_OFF_MODELS }),
     )
       ? 'off'
       : 'default',
@@ -457,7 +453,7 @@ export async function runReplay(args: ReplayArgs, io: ReplayIo): Promise<number>
         provider,
         model,
         only: only?.join(','),
-        cacheOff,
+        cache,
         cacheOffModels: io.env.AI_REVIEW_CACHE_OFF_MODELS,
         reasoning: stage === 'find' ? findTuning.reasoning : undefined,
       }),

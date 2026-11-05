@@ -17,6 +17,8 @@ export interface Provider {
   defaultModels?: { find: string; verify: string };
   /** Top-level request fields this provider needs, appended after the standard ones. */
   extraBody?: Record<string, unknown>;
+  /** The models whose paid cache writes a request turns off. Only named ones: an older model answers the switch with a 400. */
+  cacheOffModels?: readonly string[];
 }
 
 export const PROVIDERS: Record<ProviderId, Provider> = {
@@ -35,12 +37,16 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
      * and 6 verified per run against gpt-5.5's 5/5/3. Cheaper tiers were measured and declined:
      * terra reaches 3-4 of the 5, luna only 2 and never raises the new-issue scope guard at all.
      *
-     * `verify` stays gpt-5.5: it is the adversarial adjudicator, its prompts are small, and it is
-     * ~18% of the bill - there is no money in moving it and there is precision to lose. The
-     * 2026-07 finding that no asymmetric pairing measured better was about a WEAKER finder; a
-     * stronger, cheaper one is a different question, and this is its answer.
+     * `verify` stays gpt-5.5: it is the adversarial adjudicator and agreed 15 of 15 on the verify
+     * corpus. The big test of 2026-11 kept this pair as the default; its profiles and numbers are in
+     * README.md and docs/eval/2026-11/report.md.
      */
     defaultModels: { find: 'gpt-5.6-sol', verify: 'gpt-5.5' },
+    /*
+     * A write costs 25% over input and only an identical repeat reads it back: on warsaw-beer-bot#688
+     * the next head read 0 of 23 585 written tokens, and no verify call of the big test read any.
+     */
+    cacheOffModels: ['gpt-5.6-sol', 'gpt-6.1-terra', 'gpt-6.1-sol'],
   },
   anthropic: {
     id: 'anthropic',
@@ -56,6 +62,25 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     extraBody: { provider: { require_parameters: true } },
   },
 };
+
+/**
+ * What one stage's request adds to the standard fields: the provider's own, the OpenRouter executor pin, and the
+ * switch that turns cache writes off. `cacheOff` is whether that switch goes in.
+ */
+export function stageBody(provider: Provider, p: { only?: readonly string[] | null | undefined; cacheOff: boolean }): Record<string, unknown> | undefined {
+  if ((p.only === undefined || p.only === null) && !p.cacheOff) return provider.extraBody;
+  const body: Record<string, unknown> = { ...provider.extraBody };
+  if (p.only !== undefined && p.only !== null) {
+    body.provider = { ...(provider.extraBody?.provider as object | undefined), only: p.only, allow_fallbacks: false };
+  }
+  if (p.cacheOff) body.prompt_cache_options = { mode: 'explicit' };
+  return body;
+}
+
+/** Whether a request to `model` turns cache writes off by default. */
+export function cacheOffByDefault(provider: Provider, model: string): boolean {
+  return provider.cacheOffModels?.includes(model) ?? false;
+}
 
 function keyOf(p: Provider, env: Env): string | undefined {
   const v = env[p.keyEnv]?.trim();

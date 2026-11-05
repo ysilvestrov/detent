@@ -12,17 +12,23 @@ export interface Usage {
   promptTokens: number;
   /** Subset of `promptTokens` served from OpenAI's prefix cache, billed cheaper. */
   cachedTokens: number;
+  /** Subset of `promptTokens` written to that cache, billed dearer on models with a write tariff. */
+  cacheWriteTokens: number;
   /** Includes `reasoningTokens` — the API counts hidden reasoning as completion. */
   completionTokens: number;
   reasoningTokens: number;
+  /** The dollars the provider itself reported (`usage.cost`), or null when any call in this usage did not report them. */
+  reportedUsd: number | null;
 }
 
 export const EMPTY_USAGE: Usage = {
   calls: 0,
   promptTokens: 0,
   cachedTokens: 0,
+  cacheWriteTokens: 0,
   completionTokens: 0,
   reasoningTokens: 0,
+  reportedUsd: 0,
 };
 
 function num(v: unknown): number {
@@ -44,8 +50,10 @@ export function parseUsage(raw: unknown): Usage {
     calls: 1,
     promptTokens: num(u.prompt_tokens),
     cachedTokens: num(promptDetails.cached_tokens),
+    cacheWriteTokens: num(promptDetails.cache_write_tokens),
     completionTokens: num(u.completion_tokens),
     reasoningTokens: num(completionDetails.reasoning_tokens),
+    reportedUsd: typeof u.cost === 'number' && Number.isFinite(u.cost) && u.cost >= 0 ? u.cost : null,
   };
 }
 
@@ -54,16 +62,20 @@ export function addUsage(a: Usage, b: Usage): Usage {
     calls: a.calls + b.calls,
     promptTokens: a.promptTokens + b.promptTokens,
     cachedTokens: a.cachedTokens + b.cachedTokens,
+    cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
     completionTokens: a.completionTokens + b.completionTokens,
     reasoningTokens: a.reasoningTokens + b.reasoningTokens,
+    reportedUsd: a.reportedUsd === null || b.reportedUsd === null ? null : a.reportedUsd + b.reportedUsd,
   };
 }
 
 export interface Price {
   /** USD per 1M uncached input tokens. */
   input: number;
-  /** USD per 1M cached input tokens. */
-  cachedInput: number;
+  /** USD per 1M cached input tokens. Without it a cached token is billed as input. */
+  cachedInput?: number;
+  /** USD per 1M tokens written to the cache. Without it a written token is billed as input. */
+  cacheWrite?: number;
   /** USD per 1M output tokens (reasoning tokens included in that count). */
   output: number;
 }
@@ -73,9 +85,9 @@ export interface Price {
  * actually checked are listed: an unknown model prints tokens and no dollars,
  * because a confidently wrong number is worse than an admitted gap.
  *
- * Not modelled: the >272k-input-token tier (2x input / 1.5x output). Our
- * CONTEXT_BUDGET is 240 000 *characters* (~60k tokens), so a request cannot
- * reach it; if that budget ever grows past ~1M characters, this needs a tier.
+ * Not modelled: the >272k-input-token tier (2x input / 1.5x output) and Haiku's
+ * tier over 100k tokens. Our CONTEXT_BUDGET is 240 000 *characters* (~60k tokens),
+ * so a request cannot reach them; if that budget grows, this needs a tier.
  *
  * These numbers are derived, the token counts are ground truth. Validate the
  * first production run's footer against the billing dashboard delta — if they
@@ -83,9 +95,16 @@ export interface Price {
  */
 export const PRICES: Record<string, Price> = {
   'gpt-5.5': { input: 5, cachedInput: 0.5, output: 30 },
-  'gpt-5.6-sol': { input: 4, cachedInput: 0.4, output: 20 },
-  'gpt-5.6-terra': { input: 2, cachedInput: 0.2, output: 12 },
-  'gpt-5.6-luna': { input: 0.2, cachedInput: 0.02, output: 1.2 },
+  'gpt-5.6-sol': { input: 4, cachedInput: 0.4, cacheWrite: 5, output: 20 },
+  'gpt-5.6-terra': { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12 },
+  'gpt-5.6-luna': { input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1.2 },
+  'gpt-6.1-terra': { input: 1, cachedInput: 0.05, cacheWrite: 1.25, output: 5 },
+  'gpt-6.1-sol': { input: 2, cachedInput: 0.1, cacheWrite: 2.5, output: 10 },
+  'gpt-6-astra': { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 },
+  'claude-sonnet-5-5': { input: 2, output: 10 },
+  'claude-haiku-5-5': { input: 0.1, output: 0.5 },
+  'claude-opus-5-5': { input: 4, output: 20 },
+  'claude-fable-5-1': { input: 10, output: 50 },
 };
 
 /**
@@ -101,7 +120,7 @@ export const PRICES: Record<string, Price> = {
  */
 export const PRICES_CHECKED_ON = '2026-11-03';
 
-/** Dollars for `u` at `model`'s rates, or null when we have no verified price. */
+/** Dollars for `u`: what the provider reported, else `model`'s rates, or null when we have neither. */
 export function costUsd(model: string, u: Usage): number | null {
   // Free only when nothing happened at all: no call AND no billable token. That
   // is the skipped stage this exists for — an incremental run that never runs
@@ -117,12 +136,16 @@ export function costUsd(model: string, u: Usage): number | null {
   // same way an unpriced model is, rather than printed as a confident $0.00.
   if (billableTokens === 0) return null;
 
+  // The route decides the price on OpenRouter, so its own figure beats any row here.
+  if (u.calls > 0 && u.reportedUsd !== null) return u.reportedUsd;
+
   const price = PRICES[model];
   if (!price) return null;
-  const uncachedInput = Math.max(0, u.promptTokens - u.cachedTokens);
+  const plainInput = Math.max(0, u.promptTokens - u.cachedTokens - u.cacheWriteTokens);
   return (
-    (uncachedInput * price.input +
-      u.cachedTokens * price.cachedInput +
+    (plainInput * price.input +
+      u.cachedTokens * (price.cachedInput ?? price.input) +
+      u.cacheWriteTokens * (price.cacheWrite ?? price.input) +
       u.completionTokens * price.output) /
     1_000_000
   );

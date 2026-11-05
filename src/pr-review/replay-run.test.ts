@@ -167,7 +167,7 @@ describe('replay --record', () => {
     expect(new Set(lines.map((l) => l.runId)).size).toBe(1);
     expect(lines[0]).toMatchObject({ id: 'gen-1', model: 'm', provider: 'p', finishReason: 'stop', usage: { prompt_tokens: 10 } });
     const run = lines[2]!;
-    expect(run).toMatchObject({ exit: 0, error: null, raised: 1, gated: 1, pr: '1', provider: 'openai', only: { find: null, verify: null }, cacheMode: 'default' });
+    expect(run).toMatchObject({ exit: 0, error: null, raised: 1, gated: 1, pr: '1', provider: 'openai', only: { find: null, verify: null }, cacheMode: 'off' });
     expect(run.results[0]).toMatchObject({ file: 'a.ts', line: 2, quote: 'const x = 1;', verdict: 'confirmed', evidence: 'the line is there' });
   });
 
@@ -371,11 +371,28 @@ describe('replay executor pinning', () => {
     expect(bodies).toEqual([]);
   });
 
-  it('leaves the body alone without these variables', async () => {
+  it('leaves the body alone without these variables on a model with no cache switch', async () => {
     const { fetchFn, bodies } = makeFetch();
-    await replay({}, { fetchFn });
+    await replay({}, { fetchFn, env: { OPENAI_API_KEY: KEY, AI_REVIEW_MODEL: 'gpt-5.5' } });
 
     expect(Object.keys(bodyOf(bodies[0]!))).toEqual(['model', 'max_completion_tokens', 'response_format', 'messages']);
+  });
+
+  it('turns cache writes off as CI does: on the default find, not on the default verify', async () => {
+    const { fetchFn, bodies } = makeFetch();
+    await replay({}, { fetchFn, env: { OPENAI_API_KEY: KEY } });
+
+    expect(bodyOf(bodies[0]!).prompt_cache_options).toEqual({ mode: 'explicit' });
+    expect(bodyOf(bodies[1]!)).not.toHaveProperty('prompt_cache_options');
+  });
+
+  it('keeps cache writes on with AI_REVIEW_CACHE=on', async () => {
+    const path = recordPath();
+    const { fetchFn, bodies } = makeFetch();
+    await replay({ record: path }, { fetchFn, env: { OPENAI_API_KEY: KEY, AI_REVIEW_CACHE: 'on' } });
+
+    expect(bodyOf(bodies[0]!)).not.toHaveProperty('prompt_cache_options');
+    expect(readRecord(path).at(-1)).toMatchObject({ cacheMode: 'default' });
   });
 });
 

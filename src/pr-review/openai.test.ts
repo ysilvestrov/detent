@@ -127,6 +127,8 @@ describe('callStructured', () => {
       cachedTokens: 0,
       completionTokens: 2400,
       reasoningTokens: 2400,
+      cacheWriteTokens: 0,
+      reportedUsd: null,
     });
   });
 
@@ -225,6 +227,8 @@ describe('callStructured usage', () => {
       cachedTokens: 128,
       completionTokens: 40,
       reasoningTokens: 32,
+      cacheWriteTokens: 0,
+      reportedUsd: null,
     });
   });
 
