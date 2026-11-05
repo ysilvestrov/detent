@@ -1,0 +1,29 @@
+{
+  "gemini-3.8-flash": {
+    "1": {
+      "defects": [],
+      "findings": 0,
+      "pr": "418"
+    }
+  },
+  "kimi-k3.1-pro": {
+    "1": {
+      "defects": [
+        "D1",
+        "D3",
+        "D4"
+      ],
+      "findings": 7,
+      "pr": "418"
+    }
+  },
+  "glm-5.3-flashx-legal": {
+    "1": {
+      "defects": [
+        "D1"
+      ],
+      "findings": 3,
+      "pr": "418"
+    }
+  }
+}
