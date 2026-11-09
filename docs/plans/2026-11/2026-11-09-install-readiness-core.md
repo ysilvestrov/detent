@@ -73,3 +73,8 @@ Ruling: ядро можна реалізувати незалежно від н�
 Проміжне fresh review завдань 1–2: Important/Critical findings відсутні, reviewer повторив 27/27 runtime tests.
 Final: minor (deferred): generic `withRuntimeLock` допускає async callback на рівні типів, але lock синхронний; поточні виклики лише синхронні. До інтеграції async-підтверджень контракт треба явно обмежити або змінити API.
 Ruling: після повторного cross-review та вибору власника готувати поправку про довірений launcher поза writable-проєктом; завдання 3 проєктного launcher не починати до її затвердження. Ціна: інтеграція затримана, але не закріплює відому суперечність постійних дозволів.
+
+Дослідження та поправка: `docs/specs/2026-11/2026-11-09-trusted-host-amendment.md`.
+Builder check враховано; Claude cross-review на `e6ba55d`: 9 findings, 9 addressed у документі.
+`npm run smoke`: passed. Код після повного gate не змінювався.
+Ruling: не вмикати persistent allow для mutable project JS і не трактувати offline rules check як застосований desktop-дозвіл; до рішення власника Д-1 лишається пропозицією. Ціна: нові host/permission компоненти ще не інтегровані.
