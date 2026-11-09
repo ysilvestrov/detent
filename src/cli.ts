@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { crossReview, USAGE as CROSS_REVIEW_USAGE } from './commands/cross-review.js';
 import { install, USAGE as INSTALL_USAGE } from './commands/install.js';
+import { mcp, USAGE as MCP_USAGE } from './commands/mcp.js';
 import { prReview, USAGE as PR_REVIEW_USAGE } from './commands/pr-review.js';
 import { TIMEOUT_MS } from './review/cli-runner.js';
 
@@ -17,9 +18,18 @@ Commands:
                  ${PR_REVIEW_USAGE.replace('Usage: ', '')}
   install        copy the skills and the constitution block into the project
                  ${INSTALL_USAGE.replace('Usage: ', '')}
+  mcp            run the project-bound local MCP server
+                 ${MCP_USAGE.replace('Usage: ', '')}
 
 Options:
   --version      print the version of detent`;
+
+const HELP_BY_COMMAND: Readonly<Record<string, string>> = {
+  'cross-review': CROSS_REVIEW_USAGE,
+  'pr-review': PR_REVIEW_USAGE,
+  install: INSTALL_USAGE,
+  mcp: MCP_USAGE,
+};
 
 function version(): string {
   const pkg = fileURLToPath(new URL('../package.json', import.meta.url));
@@ -28,6 +38,13 @@ function version(): string {
 
 function main(argv: readonly string[]): number | Promise<number> {
   const [command, ...rest] = argv;
+  if (rest.length === 1 && rest[0] === '--help') {
+    const usage = command === undefined ? undefined : HELP_BY_COMMAND[command];
+    if (usage) {
+      process.stdout.write(`${usage}\n`);
+      return 0;
+    }
+  }
   if (command === 'cross-review') {
     return crossReview(rest, {
       cwd: process.cwd(),
@@ -54,11 +71,25 @@ function main(argv: readonly string[]): number | Promise<number> {
       err: (line) => process.stderr.write(`${line}\n`),
     });
   }
+  if (command === 'mcp') {
+    return mcp(rest, {
+      cwd: process.cwd(), input: process.stdin, output: process.stdout,
+      err: (line) => process.stderr.write(`${line}\n`),
+    });
+  }
   if (command === '--version' && rest.length === 0) {
     process.stdout.write(`${version()}\n`);
     return 0;
   }
-  process.stderr.write(`${command === undefined || command === '--help' ? '' : `detent: unknown command "${command}"\n`}${USAGE}\n`);
+  if (command === '--help') {
+    process.stdout.write(`${USAGE}\n`);
+    return 0;
+  }
+  if (command === undefined) {
+    process.stderr.write(`${USAGE}\n`);
+    return 2;
+  }
+  process.stderr.write(`detent: unknown command "${command}"\n${USAGE}\n`);
   return 2;
 }
 

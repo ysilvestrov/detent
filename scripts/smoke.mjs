@@ -2,10 +2,11 @@
 // installed `detent` as a user would run it (spec 2026-11-02-ci-gate-design.md). The folder stays:
 // recursive deletion is not used in this repository, the owner removes `detent-smoke-*` by hand.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { snapshotPackage } from '../dist/runtime/contract.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const base = mkdtempSync(join(tmpdir(), 'detent-smoke-'));
@@ -25,8 +26,8 @@ function fail(message, result) {
 
 // `npm` and the `detent` shim are .cmd files on Windows, which need a shell. Node deprecates a shell
 // with an argument list, hence one command line there. A temp path can hold spaces or `&`.
-function run(command, args, cwd, env = process.env) {
-  const options = { cwd, env, encoding: 'utf8' };
+function run(command, args, cwd, env = process.env, input = undefined) {
+  const options = { cwd, env, encoding: 'utf8', ...(input === undefined ? {} : { input }) };
   const quote = (arg) => (/^[\w./:\\=-]+$/.test(arg) ? arg : `"${arg}"`);
   const result = process.platform === 'win32'
     ? spawnSync([command, ...args].map(quote).join(' '), { ...options, shell: true })
@@ -53,9 +54,9 @@ for (const name of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY']
 // The local shim itself: `npx` would fall back to a global detent if the package lost its `bin`.
 const shim = join(consumer, 'node_modules', '.bin', process.platform === 'win32' ? 'detent.cmd' : 'detent');
 
-function detent(args, { code, stdout, stderr }) {
+function detent(args, { code, stdout, stderr, cwd = consumer, input }) {
   const name = `detent ${args.join(' ')}`;
-  const result = run(shim, args, consumer, detentEnv);
+  const result = run(shim, args, cwd, detentEnv, input);
   if (result.status !== code) fail(`${name}: expected exit code ${code}`, result);
   if (stdout !== undefined && !stdout(result.stdout)) fail(`${name}: unexpected stdout`, result);
   if (stderr !== undefined && !stderr(result.stderr)) fail(`${name}: unexpected stderr`, result);
@@ -97,6 +98,56 @@ console.log('smoke: ok: action.yml is in the repository and not in the package')
 
 const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 detent(['--version'], { code: 0, stdout: (out) => out.trim() === version });
+detent(['--help'], { code: 0, stdout: (out) => out.includes('mcp') });
+detent([], { code: 2, stderr: (err) => err.includes('Usage:') });
+for (const command of ['cross-review', 'pr-review', 'install']) detent([command, '--help'], { code: 0 });
+detent(['mcp', '--help'], { code: 0, stdout: (out) => out.includes('detent mcp --registration') });
+detent(['mcp', '--registration', join(base, 'missing-registration.json')], { code: 1, stderr: (err) => err.includes('ENOENT') || err.toLowerCase().includes('no such file or directory') });
+const mcpRepo = join(base, 'mcp-repo');
+mkdirSync(mcpRepo);
+step('git', ['init', '-q', '-b', 'main'], mcpRepo);
+step('git', ['config', 'user.name', 'Detent smoke'], mcpRepo);
+step('git', ['config', 'user.email', 'smoke@example.invalid'], mcpRepo);
+writeFileSync(join(mcpRepo, 'readme.txt'), 'MCP fixture\n');
+step('git', ['add', '.'], mcpRepo);
+step('git', ['commit', '-q', '-m', 'fixture'], mcpRepo);
+const identity = snapshotPackage(installed).contract;
+const gitExecPath = run('git', ['--exec-path'], mcpRepo).stdout.trim();
+const mcpRegistration = join(base, 'mcp-registration.json');
+writeFileSync(mcpRegistration, JSON.stringify({
+  schemaVersion: 1,
+  projectId: 'smoke-fixture',
+  revision: 1,
+  enabled: true,
+  mainRoot: realpathSync(mcpRepo),
+  gitCommonDir: realpathSync(join(mcpRepo, '.git')),
+  gitExecutable: realpathSync(join(gitExecPath, process.platform === 'win32' ? 'git.exe' : 'git')),
+  capabilities: [{ version: identity.version, digest: identity.digest, reviewers: [{ id: 'claude', executable: realpathSync(process.execPath), model: 'claude-haiku-5-5' }] }],
+  worktrees: [{ root: realpathSync(mcpRepo), configPath: join(realpathSync(mcpRepo), '.codex', 'config.toml'), version: identity.version, digest: identity.digest, state: 'active' }],
+}));
+const mcpInput = [
+  { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } },
+  { jsonrpc: '2.0', method: 'notifications/initialized' },
+  { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+  { jsonrpc: '2.0', id: 3, method: 'ping' },
+  { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'cross_review', arguments: { author: 'codex', kind: 'spec', path: 'docs/specs/2026-11/design.md', revision: 'HEAD', unexpected: true } } },
+  { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'cross_review', arguments: { author: 'claude', kind: 'spec', path: 'docs/specs/2026-11/design.md', revision: 'HEAD' } } },
+].map((message) => JSON.stringify(message)).join('\n') + '\n';
+const mcpResult = detent(['mcp', '--registration', mcpRegistration], { code: 0, cwd: mcpRepo, input: mcpInput, stdout: (out) => {
+  const messages = out.trim().split('\n').map((line) => JSON.parse(line));
+  return messages[0].result.protocolVersion === '2024-11-05'
+    && messages[1].result.tools[0].name === 'cross_review'
+    && messages[2].result !== undefined
+    && messages[3].result.isError === true
+    && messages[3].result.structuredContent.status === 'failed'
+    && messages[4].result.isError === true
+    && messages[4].result.structuredContent.status === 'failed';
+}, stderr: (err) => err === '' });
+if (mcpResult.stdout.includes('CROSS-REVIEW-RESULT')) fail('MCP smoke unexpectedly ran a paid review', mcpResult);
+const unregisteredRepo = join(base, 'unregistered-repo');
+mkdirSync(unregisteredRepo);
+step('git', ['init', '-q', '-b', 'main'], unregisteredRepo);
+detent(['mcp', '--registration', mcpRegistration], { code: 1, cwd: unregisteredRepo, stderr: (err) => err.includes('active registered worktree') });
 detent(['nope'], { code: 2, stderr: (err) => err.includes('unknown command') });
 detent(['cross-review'], { code: 2, stderr: (err) => err.includes('--author') });
 detent(['pr-review'], { code: 2, stderr: (err) => err.includes('pull_request') });
