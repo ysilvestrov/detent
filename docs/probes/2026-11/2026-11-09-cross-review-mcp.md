@@ -102,6 +102,12 @@ Desktop thread IDs у локальному evidence — A `01a1c0f7-d7f4-7500-b4
 
 ## Подальше рішення
 
+### Додаткова перевірка після cross-review специфікації
+
+Зауваження К-1 вимагало прямого доказу захисту project config. У поточному native workspace-write sandbox helper active-boundary-probe.mjs спробував тільки O_WRONLY-open без записів/truncation. README.md відкрився для запису, project .codex/config.toml та зовнішній installed review-server.mjs отримали EPERM. SHA-256 усіх файлів до/після однакові. Exact config target створено тимчасово лише з коментарем, після перевірки його hash файл прибрано. Активних settings/grants проба не додала.
+
+Evidence у `.superpowers/sdd/2026-11-09-cross-review-mcp-probe/evidence/active-write-boundary.json`. Окремий standalone `codex sandbox --permission-profile :workspace` не зміг запустити helper через `registered Core process has no package identity`, тому щодо його файлових прав висновку немає. Підтримка інших native contexts потребує власної перевірки. Поточний результат узгоджується з документованим захистом .codex у :workspace. [Codex permissions](https://learn.chatgpt.com/docs/permissions).
+
 Для перевірених Codex CLI та Desktop достатньо звичайного встановленого Node-пакета, вузького MCP-інструмента, project config і доставки цього config у worktree. Є підстава оновити специфікацію й скласти harness-план install/skills/doctor без платформного release/signing. У специфікації залишити явні acceptance checks для installer-відмови, Desktop revocation/restart та кожного додаткового адаптера родини моделей.
 
 Тестовий профіль, зовнішній каталог встановлення та фікстури залишені для відтворення. Глобальних MCP registrations і постійних shell allow rules немає. Прототип не комітився. Тимчасові test repos залишаються під `%TEMP%/review-input-test-*`. У ранніх тестах прибиралися лише власні щойно створені test repos, після огляду recursive cleanup вилучено. Ранні fixture-тести також змістили A HEAD, тому live-review використовують явно зафіксовані commits.

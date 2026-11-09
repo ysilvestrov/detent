@@ -1,8 +1,8 @@
 # Завершене встановлення Detent і проєктний дозвіл на cross-review
 
 Дата: 2026-11-09
-Статус: чернетка — оновлений MCP-дизайн чекає на затвердження
-Spec-review: pending — оновлена редакція замінює попередній дизайн launcher і Д-1
+Статус: чекає на затвердження оновленого MCP-дизайну
+Spec-review: claude/default @ 8a1d7c7 (author: codex) — 12 findings: 12 fixed, 0 rejected
 
 Ця редакція замінює попередній privileged launcher та пропозицію платформного host з Д-1. Попередні рішення й рев'ю доступні в Git. Поточний продукт ще не реалізує цей контракт. Уже написані runtime contract/store є придатними для повторного використання частинами.
 
@@ -16,27 +16,29 @@ Spec-review: pending — оновлена редакція замінює поп
 
 Явний `detent install` запропонує встановити пакет поза writable-проєктом і дозволити один інструмент рев'ю для цього репозиторію та його Git-зареєстрованих worktrees. У запиті будуть версія, шляхи, провайдери й використання їхніх облікових записів та лімітів. Одна згода охоплює цей план, подальші рев'ю проходять без нових погоджень. Автентифікація reviewer CLI та штатна довіра хоста до каталогу є окремими передумовами.
 
+Перший text-only adapter для Codex — Claude CLI з чинною авторизацією. Поточний agy-fallback у Codex MCP-шляху ще не підтверджений і недоступний до окремої проби. Відсутність придатного Claude дає неповний setup. Legacy CLI-шляхи Claude/Antigravity зберігають свій чинний вибір reviewer.
+
 Claude Code та Antigravity зберігають чинний npx-шлях і формат встановлення скілів. Codex отримує локальний MCP-інструмент. Інсталятор доставляє погоджену конфігурацію у worktree. Зміна версії, доступів чи переліку провайдерів потребує явного install/update. Видалення попередніх копій є окремою операцією.
 
 ### На чому стоїть рішення
 
 - Один проєктний дозвіл та інша родина reviewer — `[вимога власника]`.
-- Codex CLI й Desktop виконали spec/code MCP-виклики в A/A-linked без додаткових дозволів. У B інструмент відсутній — `[проба]` П-8.
+- CLI перевірено з ізольованим профілем та --ignore-user-config/--ignore-rules. Desktop власник перевірив у своїй сесії й повідомив нуль запитів дозволу в усіх трьох тестах. A/A-linked успішні, B без інструмента — `[проба]` П-8. Це результат конкретного середовища, передумова штатної довіри не є новим review grant.
 - Project MCP config не успадковується linked worktree автоматично, доставка однакового config працює — `[проба]` П-8.
 - Звичайні Node-модулі поза writable roots забезпечили перевірений запуск. Signing не був потрібен для цієї проби — `[проба]` П-8. Інші ОС і версії хостів потребують перевірок.
-- Незмінність установленого коду відносно оголошеного sandbox і захист host config є передумовами безпеки — `[виведення]`. Full-access не отримує цієї гарантії.
+- Захист коду й host config перевіряється для обраної permission surface перед grant. Codex :workspace документує read-only .codex, підтримка іншої політики потребує еквівалентного доказу — `[проба]` П-9 для фактичного середовища та `[виведення]` для майбутніх конфігурацій. Full-access не отримує гарантії sandbox.
 
 ### Ключові рішення
 
 1. Один локальний MCP-інструмент з вузькими параметрами та project-scoped policy. Розглянуто постійний shell-prefix на launcher у проєкті, відкинуто через можливість підміни коду. Платформний executable/signing з Д-1 вилучено з поточного обсягу за результатами П-8.
 2. Звичайний самодостатній Node-пакет у локальному захищеному каталозі. Розглянуто імпорт з node_modules або проєктної runtime-копії, відкинуто для privileged MCP через writable-код.
 3. Reviewer отримує committed-текст і працює без інструментів. Розглянуто агентне читання checkout і запуск тестів, відкинуто для цієї capability через ширші права й побічні дії.
-4. Згода належить конкретному репозиторію, установленій версії та погодженим провайдерам. Новий worktree отримує той самий config після перевірки Git-належності. Розглянуто ручне підтвердження кожного рев'ю, відкинуто як несумісне з метою.
+4. Згода належить конкретному репозиторію, установленій версії та погодженим провайдерам. Native config і protected state мають бути недоступні агентним записам, а installer grant потребує довіреного user/host approval channel. Новий worktree отримує той самий config після перевірки Git-належності. Розглянуто ручне підтвердження кожного рев'ю, відкинуто як несумісне з метою.
 5. Доставка скілів, effective permissions і live-доступність показуються окремо. Розглянуто один зелений статус після копіювання, відкинуто через відмінність цих фактів.
 
 ### Що стане гірше
 
-Потрібні локальна копія пакета й конфігурація MCP у кожному worktree. Клон і переміщення проєкту потребують setup. Текстовий reviewer має лише наданий контекст і не запускає тести. Binary/submodule/LFS-material та надмірний payload отримують явну відмову. Підтримку версій хостів треба перевіряти. Scripts для встановлення .agents мають врахувати exit 6 для неповного setup.
+Потрібні локальна копія пакета й конфігурація MCP у кожному worktree. Клон і переміщення проєкту потребують setup. Reviewer не шукає по checkout і не запускає тести. Перевірки конституції, відповідності реалізації та повторного використання коду мають явне «не перевірено», якщо потрібний контекст не передано. Сумарний payload обмежено 1 MiB разом із повними head blobs усіх змінених текстових файлів, тому одна правка lockfile понад 1 MiB також відхиляється. Binary/submodule/LFS-material і неоднозначний merge-base отримують явну відмову. Tracked .codex/config.toml потребує рішення користувача щодо локальної конфігурації. Scripts для .agents мають врахувати новий exit 6.
 
 ### Оцінка
 
@@ -54,7 +56,7 @@ Claude Code та Antigravity зберігають чинний npx-шлях і �
 
 `detent:run` renderer працює поруч із чинним `detent:author`. У спільних .agents текстах явно розділені Codex MCP і чинна Antigravity-команда. Claude .claude/skills, plugin, CLAUDE.md отримують чинний scoped npx. Наявність Codex MCP не є умовою встановлення або роботи Claude/Antigravity. Конституція, spec-format і всі скіли мають узгоджені команди запуску. Bare `npx detent` у доставлених текстах не використовується.
 
-Зберегти `--hosts codex-cli,codex-desktop,agy` незалежно від targets. Невідомий/порожній id та `--hosts claude` дають usage exit 2. Сам факт наявності executable не обирає хост. Для .agents без --hosts інтерактивний install просить вибір, без доступного каналу вибору повертає 6 після доставки файлів. Для agy показується чинна точна npx-команда й ручна інструкція дозволів, без запису host policy. Цей статус не блокує setup exit 0. Install тільки --claude зберігає чинні exit-коди, не встановлює MCP/runtime й не питає Codex permissions.
+Додати `--hosts codex-cli,codex-desktop,agy` незалежно від targets. Невідомий/порожній id та `--hosts claude` дають usage exit 2. Сам факт наявності executable не обирає хост. Для .agents без --hosts інтерактивний install просить вибір, без доступного каналу вибору повертає новий exit 6 після доставки файлів. Для agy показується чинна точна npx-команда й ручна інструкція дозволів, без запису host policy. Цей статус не блокує setup exit 0. Install тільки --claude зберігає чинні exit-коди, не встановлює MCP/runtime й не питає Codex permissions.
 
 ## Встановлений пакет і межа виконання
 
@@ -66,7 +68,7 @@ Bootstrap є явною операцією з конкретного реліз�
 
 Жодний модуль виконання, package loader, helper чи prompt-system-template не імпортується з проєкту. Проєктні prompts і матеріали розглядаються як untrusted data. Перевірка хешів доводить цілісність копії, довіра до релізу спирається на явно авторизоване встановлення. Інвентар не є publisher signature.
 
-Зберегти вже реалізований contract/store, version/digest generation, блокування й atomic temp+rename registry. Старі generation лишаються. Repair публікує нову повну generation, переадресація config відбувається тільки після перевірки. Активні worktrees зберігають pinned version/digest. Проєктний elevated launcher більше не є частиною цього дизайну.
+Повторно використати codecs, hashes, contract validation і принцип generation з уже реалізованого core. Чинний RuntimeStore має project-root layout і fail-fast lock, він не стає захищеним store без адаптації. Узагальнення layout та збереження чинної поведінки робляться окремим like-for-like refactor PR, потім protected layout додається поведінковою зміною. Package lock і project writer lock різні. Старі generation лишаються, repair публікує нову повну generation, config переключається тільки після її перевірки. Worktrees зберігають pinned version/digest. Проєктний elevated launcher вилучений.
 
 ## Проєктна прив'язка і worktrees
 
@@ -95,46 +97,56 @@ args = ["<installed entrypoint>", "--registration", "<protected project binding>
 env = { NODE_OPTIONS = "", NODE_PATH = "" }
 enabled_tools = ["cross_review"]
 
+tool_timeout_sec = 930
+
 [mcp_servers.detent.tools.cross_review]
 approval_mode = "approve"
 ```
 
 Застосовується тільки project .codex/config.toml. Інсталятор зберігає сторонні TOML-ключі й коментарі. Потрібна штатна довіра хоста до проєкту. Правила запуску shell, глобальні MCP, global/default user config, managed policy та permission profiles цим встановленням не змінюються. Ізольований профіль у пробі був лабораторним способом запустити CLI без сторонніх інтеграцій, він не є вимогою продукту.
 
+Машинний .codex/config.toml є локальним і не комітиться. Install додає точний ігнорований шлях у власний керований блок .gitignore зі збереженням інших правил. Якщо файл уже tracked, до запису абсолютних шляхів/approve виникає conflict exit 4, прихований skip-worktree або untrack індексу не застосовуються. Це не привід ігнорувати весь .codex чи сторонні зміни. Після коміту погоджених артефактів install legacy git-status preflight має лишатися чистим.
+
 Перед записом один запит охоплює точний file/config diff, package version/digest, repository/worktree scope, перелік reviewer-провайдерів, передачу committed матеріалів, платні ліміти й нейтральні тимчасові записи. Читання credential-файлів нашим кодом не дозволяється. Авторизована reviewer CLI використовує власний штатний auth.
 
-`--permissions ask|apply|skip` зберігається, типово ask. При ask без TTY створюється локальний proposal й точна apply-команда, зависання чи автоматичної згоди немає. Агент може один раз передати пропозицію користувачеві через доступний канал. Відмова/skip лишає файли скілів, але не записує approve і не дає unattended-ready.
+Native .codex config, package і registration paths перевіряються на недоступність агентним записам у фактичному permission contract, включно з writable ancestors/aliases. Grant заборонено, якщо агент може підмінити command/args. Звичайна присутність каталогу в проєкті не є доказом захисту. Керований ignore entry та untracked стан config перевіряються як compatibility conditions під час install/doctor, їхня зміна дає needs-action. Якщо current host proof не охоплює захист виконуваного коду й native config, approve не записується.
 
-Apply приймає `--proposal <path> --expect-hash <sha256>`. Hash доводить незмінність пропозиції, факт згоди спирається на явне поточне доручення користувача або інтерактивне підтвердження. Apply не приймає довільні executable/config paths з редагованого proposal. Він повторно виводить допустимі paths і capability зі встановленого пакета, перевіреного проєкту та schema. Перед записом повторно перевіряються hashes старих файлів, версія, metadata, захист install/config paths і namespace collision. Застарілий proposal дає conflict без записів.
+Додати `--permissions ask|apply|skip`, типово ask. При ask без TTY створюється локальний proposal й точна apply-команда, зависання чи автоматичної згоди немає. Агент може передати пропозицію користувачеві один раз. Відмова/skip лишає файли скілів, але не записує approve і не дає unattended-ready.
+
+Apply приймає `--proposal <path> --expect-hash <sha256>`. Hash доводить лише цілісність пропозиції. Grant виконується інтерактивним користувачем або installer-процесом, чий точний restricted write/command scope погоджений через trusted native host approval. Chat interpretation, самодекларований approval flag/environment і possession proposal hash не є машинним доказом згоди. Агент у sandbox не може записати захищені config/state або видати такий grant самостійно. За відсутності каналу підтвердження apply дає needs-action/6. Результат містить джерело підтвердження, а не твердження про криптографічну атестацію чату.
+
+Apply повторно виводить допустимі paths і capability зі встановленого пакета, перевіреного проєкту та schema, а не виконує довільні paths/команди з proposal. Під writer lock звіряються hashes попередніх файлів, Git metadata, версія, namespace collision й актуальність host-approved scope. Застарілий proposal дає conflict без записів.
 
 Повторний install того самого version/digest і незмінного scope звіряє захищений запис згоди та effective host config. Зміна версії, провайдерів або прав показує новий план update для одноразового погодження. Відкликаний/змінений користувачем native grant не відновлюється мовчки зі старого запису згоди. Новий worktree не відновлює відкликаний grant інших checkout.
 
 Відкликання для всього репозиторію виконується явним `detent permissions revoke`. Воно спершу вимикає захищену registration, яку сервер перевіряє перед кожним review, потім прибирає тільки власні approve entries у зареєстрованих configs. Навіть при частковому записі configs disabled registration відхиляє наступні виклики. Вже запущений review може завершитися, що показується у результаті revoke. Повернення grant потребує нової явної згоди. Локальне native редагування одного config діє на його worktree й не заявляється репозиторним revoke.
 
-Install, consent update, worktree inventory і revoke серіалізуються одним project lock для всіх version/digest. Допуск review лінеаризується під цим самим lock на перевірці enabled/revocation revision і capability, після чого lock звільняється до запуску reviewer. Допущений до revoke запит може запуститися й завершитися після revoke, новий допуск після atomic disable заборонений. Revoke показує cutoff revision та це обмеження, а не непідтверджене число скасованих процесів. Offline configs лишаються в inventory із pending cleanup, disabled registration діє незалежно від доступності checkout.
+Install, consent update, worktree inventory і revoke серіалізуються одним project writer lock для всіх version/digest. Review читає цілісний atomically published snapshot project state без writer lock, точкою допуску є отримання цього snapshot. Тому паралельні reviews не отримують install-locked через коротку конкуренцію. Допущений до atomic revoke запит може запуститися й завершитися після revoke, новий snapshot після disable забороняє допуск. Revoke показує cutoff revision й це обмеження. Offline configs лишаються в inventory із pending cleanup. Writer lock очікується до 5 секунд із явним busy результатом без grant. Stale lock не знімається лише за віком, recovery потребує підтвердженого завершення owner process або явної перевіреної repair-операції. Залишений writer lock не блокує читання останнього цілісного дозволеного snapshot.
 
 ## MCP-контракт і текстове рев'ю
 
 Tool вхід містить явного `author: codex|claude|agy` та один варіант матеріалу.
 
 ```json
-{"author":"codex","kind":"spec","path":"docs/specs/design.md","revision":"HEAD"}
+{"author":"codex","kind":"spec","path":"docs/specs/2026-11/design.md","revision":"HEAD"}
 {"author":"codex","kind":"code","base":"main","head":"HEAD"}
 ```
 
 Автор задається скілом як у чинному --author. Це declared provenance, автоматичне визначення фактичного авторства не стверджується. Невідомий author або неможливість підтвердити сімейство reviewer дають відмову. Поточні CLI flags і raw model overrides не стають tool arguments. Немає parameters для shell-команд, prompt, executable, registration/root, output path, permissions або arbitrary CLI flags. Schema відхиляє невідомі поля.
 
+Для spec/code дозволено лише додатковий bounded `contextPaths` із repository-relative Git paths. Він передає контекст як untrusted blobs із того самого resolved review commit. Для spec автоматично додаються доступні committed constitution/spec-format/root-spec/package manifest/detent.json та project review guidance за чинними config keys. reviewContext і .detent/prompts/review-spec.md зберігаються як позначені untrusted guidance, без перетворення на privileged system instructions. Відсутність/небезпека reference або перевищення бюджету контексту дає явний coverage result/відмову, без тихого пропуску. Reviewer report має per-check verified/not-verified з evidence paths. Перевірку повторного використання чи відповідності коду не можна оголосити пройденою за відсутності потрібних файлів. Автор може передати додаткові contextPaths, права reviewer залишаються text-only.
+
 Повторно використати чинні family mapping, reviewer selection/fallback та review protocol. Eligibility обмежується погодженими й live-перевіреними text-only adapters. Чинний worktree runner не викликається з MCP. Для цієї редакції підтверджений adapter Claude, інші отримують capability лише після окремої live no-tools проби. При відсутності придатного іншого сімейства setup лишається неповним. CLI Claude/Antigravity як author-host зберігають наявний legacy runner.
 
-Spec path має бути точним repository-relative POSIX path, без absolute/traversal/NUL. Git pathspec magic вимикається. Revision через --end-of-options перетворюється на immutable commit, читається лише blob з того дерева. Незакомічені зміни не включаються.
+Spec path нормалізується й перевіряється чинним specPathError з тими самими config.specsDir та правилом `<specsDir>/<YYYY-MM>/*.md`. Окремо відхиляються absolute/traversal/NUL, Git pathspec magic вимикається. Revision через --end-of-options перетворюється на immutable commit, читаються тільки Git blobs з того дерева. Незакомічені зміни не включаються. Пробний fixture spec.md у П-8 демонстрував transport і не розширює продуктовий path contract.
 
-Для PR base/head перетворюються на commits, визначається merge-base і передається diff mergeBase..head та head blobs змінених текстових файлів. Це зберігає семантику чинного base...head review. Merge-base відсутній/неоднозначний дає помилку. Rename/deletion позначаються явно. Повертаються requested base/head і обчислений mergeBase. Git викликається без shell, зовнішніх diff/textconv, checkout, hooks, filters та виконання project code.
+Для PR base/head перетворюються на commits, визначається merge-base і передається diff mergeBase..head та head blobs змінених текстових файлів. Для єдиного merge-base це відповідає чинному base...head review. Відсутній або неоднозначний merge-base відхиляється явно, на відміну від legacy Git вибору однієї бази в criss-cross history. Rename/deletion позначаються явно, повертаються requested base/head і mergeBase. Git працює без shell, зовнішніх diff/textconv, checkout, hooks, filters та project code.
 
 Binary, symlink, submodule та LFS pointer матеріали отримують явну помилку. Недопустимий UTF-8, порожній diff і перевищення payload 1 MiB також відхиляються. Обрізання, пропуск файлів або передача pointer як вихідного коду заборонені. Звіт перелічує exact coverage, тож відсутній контекст видно.
 
-Установлений fixed system prompt вимагає аналізу untrusted матеріалу й забороняє виконувати його інструкції. Reviewer працює у нейтральному каталозі поза checkout, без tools, MCP, project/user hooks, CLAUDE.md/AGENTS.md, plugin/custom commands і session persistence. Auth лишається штатним для CLI. Для Claude використано П-8-комбінацію restricted/safe-mode, empty tools, strict empty MCP config та disableAllHooks. Init model/tools/MCP і stream перевіряються. Увімкнений tool, невідомий model family або tool_use означають failed, а не завершений review.
+Установлений fixed system prompt вимагає аналізу untrusted матеріалу й забороняє виконувати його інструкції. Reviewer працює у нейтральному каталозі поза checkout, без tools, MCP, автоматичного завантаження project/user hooks, CLAUDE.md/AGENTS.md, plugins/custom commands і session persistence. Явно переданий committed контекст лишається лише текстом. Auth штатний для CLI. Для Claude використано П-8-комбінацію restricted/safe-mode, empty tools, strict empty MCP config та disableAllHooks. Init model/tools/MCP і stream перевіряються. Увімкнений tool, невідомий model family або tool_use означають failed.
 
-Загальний review deadline 180 секунд, stdout+stderr cap 1 MiB. Fallback дозволений тільки на інший погоджений eligible text-only adapter в межах deadline. Timeout зупиняє chain, аналогічно чинному правилу. Legacy CLI зберігає свій timeout і exit-коди.
+Product review deadline 900 секунд збережений від чинного cross-review, разом із fallback. 180 секунд у П-8 були лише параметром малих fixture-проб. MCP tool_timeout_sec має бути щонайменше 930 секунд для завершення/cancel cleanup, host contract перевіряє цю можливість. Хост із меншим незмінним лімітом отримує needs-action, тихого скорочення deadline немає. Fallback лише на погоджений eligible text-only adapter, timeout зупиняє chain. Abort, stdio disconnect і deadline завершують local reviewer process tree, detached children не запускаються. Provider billing може продовжитися після локального обриву, результат тоді indeterminate, автоматичного платного retry немає. Product tests покривають host timeout, cancellation і довгий review. Legacy CLI exit-коди збережені.
 
 Успіх повертає status=completed, report, findings/marker за чинним protocol, authorDeclared, фактичні reviewer/model/family, resolved commits, coverage, hash точного stdin payload, effectiveRoot, registration identity і no-tools observation. Completed означає отриманий валідний звіт, наявність дефектів записується окремо. Spawn/auth/error/timeout/overflow/invalid report повертають failed/needs-action з причиною, без успішного marker. Повторне надсилання після транспортної невизначеності автоматично не робиться, щоб не створювати приховані повторні платні reviews.
 
@@ -176,14 +188,23 @@ Usage exit 2, preflight conflict 4, незавершений setup 6. Permission
 
 Окремий CLI profile був лабораторним засобом ізоляції. Спроба завантажити звичайний user config була відхилена auto-review через сторонні інтеграції, її не повторювали. Desktop працював у звичайній сесії власника. Product installer UI, Desktop restart/revocation, Linux/macOS й додаткові reviewer adapters цими пробами не підтверджені.
 
+### П-9. Захист config і виконуваного коду від sandbox-записів
+
+Після зауваження К-1 виконано окрему беззаписну пробу в поточному native workspace-write sandbox. Node відкривав наявні файли лише з O_WRONLY, без записів і truncation, й порівнював SHA-256 до/після. Позитивний контроль README.md відкрився для запису. .codex/config.toml і зовнішній installed review-server.mjs отримали EPERM, хеші всіх трьох файлів не змінилися. Для exact config target тимчасово створено файл лише з коментарем, після перевірки SHA його прибрано. Settings/grants він не містив.
+
+Результат у локальному `.superpowers/sdd/2026-11-09-cross-review-mcp-probe/evidence/active-write-boundary.json`. Поточний хост захищає власний project config і зовнішній код, як вимагає контракт. Окрема raw CLI sandbox-проба з :workspace завершилася до helper помилкою `registered Core process has no package identity`, це не доказ її файлових прав. Desktop/core і standalone CLI можуть мати різні backend/config contexts, тому адаптер не переносить native proof між ними автоматично. Для неперевірених surfaces діє needs-action gate.
+
+Codex документує read-only .codex у вбудованому :workspace профілі. Документація підтверджує очікуваний контракт, локальна проба підтверджує лише фактичний поточний sandbox. [Офіційний контракт permission profiles](https://learn.chatgpt.com/docs/permissions).
+
 ## Заявка → доказ
 
 | Заявка | Де записується | Що доводить | Сила |
 | --- | --- | --- | --- |
 | Скіли встановлено | filesInstalled, manifest | Точні файли, target і rendered blocks | Потребує product tests |
 | Виконується pinned package | runtimeVerified | Захищений install path, інвентар і config identity | П-8 для spike, product acceptance обов'язкова |
+| Захищені config і код | native boundary evidence | Write-handle позитивного контролю дозволено, config/installed-code EPERM, незмінні хеші | П-9 для поточного native host, інші surfaces потребують перевірки |
 | Дозвіл налаштовано | permissionSetupComplete | Свіжий native effective config, binding enabled, host contract | П-8 CLI/ручний Desktop |
-| Користувач погодив scope | protected registration | Явна згода й hash точного плану | У spike чатова згода, installer UI не перевірений |
+| Користувач погодив scope | protected registration | Інтерактивний user або trusted native write approval, hash лише для цілісності | У spike чатова згода й host-approved записи, product installer channel ще не перевірений |
 | Згода працює між сесіями/worktrees | liveReviewVerified | Окремі completed tool calls і user prompt observation | П-8 CLI + Desktop |
 | Інший repository виключено | binding validation | B config absence та runtime cwd rejection | П-8 |
 | Reviewer іншого сімейства | review result | Declared author source + фактичний init model/family | П-8 OpenAI→Anthropic, інші adapter потребують проб |
@@ -209,10 +230,21 @@ Usage exit 2, preflight conflict 4, незавершений setup 6. Permission
 
 ## Рев'ю спеки
 
-Оновлена редакція потребує нового cross-review за явним дорученням власника. Попередні маркери @f36e370 та Д-1 @e6ba55d залишаються в Git і не видаються за рев'ю цього MCP-дизайну.
+Builder check завершено до коміту. За явним дорученням власника локально зібраний Detent запустив cross-review коміту 8a1d7c7 з чистого тимчасового checkout, без npx download і без --reviewer override. CLI обрав claude/default іншого сімейства. Exit 0, отримано 12 зауважень, усі розглянуто й виправлено нижче. Попередні маркери @f36e370 та Д-1 @e6ba55d лишаються історією інших редакцій. Після triage повторне рев'ю не запускалося.
 
 | № | Перевірка | Рішення | Причина / що змінено |
 | --- | --- | --- | --- |
 | Б-1 | Спільний revoke/install lock і inventory configs | виправлено | Один project record для всіх версій, pending/active entries, atomic disable та визначена точка допуску review |
 | Б-2 | Джерело effective permissions proof | виправлено | Свіжий native config/read, support contract і host identity, окремий Desktop proof, needs-action при невідомих підставах |
-| pending | Інша родина моделей | очікується | Після коміту цієї редакції |
+| К-1 | Writable project config | виправлено | П-9, config/package/state write boundary до grant, ignore як compatibility condition, невідома політика дає needs-action |
+| К-2 | Git status і машинний config | виправлено | Локальний config і точний gitignore entry, tracked config дає conflict, legacy clean-tree acceptance |
+| К-3 | Self-approval через apply/hash | виправлено | Hash лише цілісність, grant тільки через user/native protected write channel, немає approval прапорів |
+| К-4 | Втрата контексту spec review | виправлено | Втрату розкрито власнику, committed references/reviewContext/guidance та contextPaths, per-check verified/not-verified |
+| К-5 | Project-only store і fail-fast lock | виправлено | Окремий layout refactor, bounded writer lock/recovery, lock-free atomic snapshot admission |
+| К-6 | Deadline і MCP timeout | виправлено | Product 900 s, MCP 930 s, cancellation і indeterminate transport, fixture 180 s не нормативні |
+| К-7 | Повні великі head blobs | виправлено | Власнику явно зазначено сумарний 1 MiB, включно з whole head files і lockfile, без тихих exclusions |
+| К-8 | Лабораторна область доказу | виправлено | Owner premise розділяє isolated CLI та owner-operated Desktop, нуль prompts зі слів власника |
+| К-9 | Лише Claude text-only | виправлено | Dependency та втрата Codex agy fallback явно в owner section, інші adapters потребують проб |
+| К-10 | Нові прапори названі чинними | виправлено | --hosts, --permissions та exit 6 явно нові, базові flags/Claude-only codes збережені |
+| К-11 | Неоднозначний merge-base | виправлено | Звужено equivalence claim до unique merge-base, відмову при criss-cross розкрито |
+| К-12 | Spec path format | виправлено | Повторне використання чинного specsDir/YYYY-MM validator, приклад виправлено |
