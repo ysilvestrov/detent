@@ -31,9 +31,9 @@
 `snapshotPackage(source:string):RuntimeSnapshot`; `parseRegistry(text:string):RuntimeRegistry`;
 `RuntimeRegistry {schemaVersion:1; entries:Record<string,{generation:string}>}`.
 
-- [ ] RED: реальний package fixture дає byte hashes, відкидає symlink, залежності, traversal, некоректний registry; обидві пари v1/v2 збережені.
-- [ ] GREEN: детермінований інвентар package.json + dist/prompts/skills/constitution; строгі codecs; source metadata не є доказом publisher trust.
-- [ ] Перевірити `npm test -- src/runtime/contract.test.ts`, потім `npm run gate`; коміт.
+- [x] RED: реальний package fixture дає byte hashes, відкидає symlink, залежності, traversal, некоректний registry; обидві пари v1/v2 збережені.
+- [x] GREEN: детермінований інвентар package.json + dist/prompts/skills/constitution; строгі codecs; source metadata не є доказом publisher trust.
+- [x] Перевірити `npm test -- src/runtime/contract.test.ts`, потім `npm run gate`; коміт.
 
 ## Завдання 2: Store і publication
 
@@ -42,9 +42,9 @@
 `RuntimeStore.publish(snapshot:RuntimeSnapshot):{generation:string; reused:boolean}`;
 `verifyRuntime(root:string, contract:RuntimeContract):string|null` (шлях generation або відсутня пара; corrupt кидає помилку).
 
-- [ ] RED: publish/read/repeat, repair новою generation, v1/v2 та два digest однієї версії, зайнятий lock, пошкоджений registry, path aliases.
-- [ ] GREEN: exclusive lock з owner PID, перевірка шляхів, generation uuid, перевірка записаної копії; повний реєстр через temp+rename у тому самому каталозі; finally знімає лише власний lock.
-- [ ] Перевірити `npm test -- src/runtime/contract.test.ts src/runtime/store.test.ts`, `npm run gate`; коміт.
+- [x] RED: publish/read/repeat, repair новою generation, v1/v2 та два digest однієї версії, зайнятий lock, пошкоджений registry, path aliases.
+- [x] GREEN: exclusive lock з owner PID, перевірка шляхів, generation uuid, перевірка записаної копії; повний реєстр через temp+rename у тому самому каталозі; finally знімає лише власний lock.
+- [x] Перевірити `npm test -- src/runtime/contract.test.ts src/runtime/store.test.ts`, `npm run gate`; коміт.
 
 ## Завдання 3: Переносимий launcher і worktree discovery
 
@@ -67,3 +67,9 @@
 Ruling: ядро можна реалізувати незалежно від непідтверджених адаптерів дозволів; повний setup/готовність не заявляються до їх окремого вирішення.
 
 Завдання 1: контракт та реєстр реалізовано; RED — відсутній `contract.js`; GREEN — 20/20 нових тестів. `npm run gate`: 1518 passed, 1 skipped; typecheck/build passed.
+
+Завдання 2: filesystem store реалізовано; RED — відсутній `store.js`; GREEN — 27/27 runtime tests. `npm run gate`: 1525 passed, 1 skipped; typecheck/build passed.
+
+Проміжне fresh review завдань 1–2: Important/Critical findings відсутні, reviewer повторив 27/27 runtime tests.
+Final: minor (deferred): generic `withRuntimeLock` допускає async callback на рівні типів, але lock синхронний; поточні виклики лише синхронні. До інтеграції async-підтверджень контракт треба явно обмежити або змінити API.
+Ruling: після повторного cross-review та вибору власника готувати поправку про довірений launcher поза writable-проєктом; завдання 3 проєктного launcher не починати до її затвердження. Ціна: інтеграція затримана, але не закріплює відому суперечність постійних дозволів.
