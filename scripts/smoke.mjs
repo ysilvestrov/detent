@@ -5,8 +5,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { snapshotPackage } from '../dist/runtime/contract.js';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const base = mkdtempSync(join(tmpdir(), 'detent-smoke-'));
@@ -86,6 +85,7 @@ step('npm', ['install', `../pack/${archive}`, '--no-audit', '--no-fund', '--sile
 step('git', ['init', '-q'], consumer);
 
 const installed = join(consumer, 'node_modules', '@ysilvestrov', 'detent');
+const { snapshotPackage } = await import(pathToFileURL(join(installed, 'dist', 'runtime', 'contract.js')));
 for (const dir of ['skills', 'prompts', 'constitution']) {
   for (const file of filesUnder(join(root, dir))) requireFile(installed, `${dir}/${file}`, 'the installed package');
 }
