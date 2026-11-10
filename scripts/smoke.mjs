@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const base = mkdtempSync(join(tmpdir(), 'detent-smoke-'));
+const base = realpathSync(mkdtempSync(join(tmpdir(), 'detent-smoke-')));
 const pack = join(base, 'pack');
 const consumer = join(base, 'consumer');
 const home = join(base, 'home');
