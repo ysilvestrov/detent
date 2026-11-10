@@ -285,7 +285,7 @@ numbers will differ.
 
 Measured on 2026-11-05 on one project, warsaw-beer-bot. Treat the numbers as evidence about that
 project, not as a ranking of the models: each comes from one or two PRs. Records, scores and the
-reasoning are in [`docs/eval/2026-11/report.md`](docs/eval/2026-11/report.md).
+reasoning are in [`docs/eval/2026-11/report.en.md`](docs/eval/2026-11/report.en.md) (Ukrainian original: [`report.md`](docs/eval/2026-11/report.md)).
 
 | Provider | Profile | Find + verify | Defects published on PR #418, of 5, per run | On PR #930, of 3, per run | Corpus: published, false | First full review of #418 |
 |---|---|---|---|---|---|---|
