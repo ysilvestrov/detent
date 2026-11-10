@@ -3,7 +3,7 @@ import { realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { readAdmission as readAdmissionDefault, type RuntimeIdentity } from './registration.js';
 import { parseReviewRequest, prepareReview as prepareReviewDefault, type PreparedReview, type ReviewRequest } from './input.js';
-import { IndeterminateProviderOutcomeError, runClaudeReview as runClaudeReviewDefault, type ClaudeReviewResult } from './claude.js';
+import { ClaudeReportValidationError, IndeterminateProviderOutcomeError, runClaudeReview as runClaudeReviewDefault, type ClaudeReviewResult } from './claude.js';
 import { ADAPTERS, familyOfAuthor } from '../review/adapters.js';
 import { classifyResult, markerLine, successBody } from '../review/protocol.js';
 
@@ -194,7 +194,7 @@ export async function serveMcp(options: McpServerOptions, io: McpServerIO = {}):
       } catch (error) {
         const reason = messageOf(error);
         const status = stage === 'admission' ? 'needs-action' : 'failed';
-        if (!cancelled.has(key)) send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: reason }], structuredContent: { status, reason, ...(error instanceof IndeterminateProviderOutcomeError ? { providerOutcome: error.providerOutcome } : {}) }, isError: true } });
+        if (!cancelled.has(key)) send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: reason }], structuredContent: { status, reason, ...(error instanceof ClaudeReportValidationError ? { diagnostics: { mode: error.mode, expectedChecks: error.expectedChecks, untrustedReportTail: error.untrustedReportTail } } : {}), ...(error instanceof IndeterminateProviderOutcomeError ? { providerOutcome: error.providerOutcome } : {}) }, isError: true } });
       } finally {
         clearTimeout(deadlineTimer);
         active.delete(key);
