@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { serveMcp } from './server.js';
-import { IndeterminateProviderOutcomeError } from './claude.js';
+import { ClaudeReportValidationError, IndeterminateProviderOutcomeError } from './claude.js';
 
 const neutral = (): string => mkdtempSync(join(tmpdir(), 'detent-mcp-test-neutral-'));
 const repo = (): string => mkdtempSync(join(tmpdir(), 'detent-mcp-test-repo-'));
@@ -23,6 +23,29 @@ const admitted = (root: string, roots = [root]) => ({
 });
 
 describe('serveMcp', () => {
+  test('forwards bounded untrusted invalid-report diagnostics only as a failed result', async () => {
+    const input = new PassThrough(); const output = new PassThrough();
+    let response = ''; output.on('data', (chunk) => { response += chunk.toString(); });
+    const root = repo();
+    const report = `${'x'.repeat(9000)}\nCHECK: format | not-verified | evidence: []\nCROSS-REVIEW-RESULT: 0 findings`;
+    const reason = 'Claude report has invalid or duplicate check evidence.';
+    const done = serveMcp({ registrationPath: 'registration', cwd: root, identity: { version: '1.0.0', digest: 'a'.repeat(64) }, neutralCwd: neutral(), input, output }, {
+      readAdmission: () => admitted(root) as never,
+      prepareReview: () => ({ mode: 'diff', author: 'codex', commits: { head: 'b'.repeat(40) }, coverage: [], text: 'payload', inputSha256: 'c'.repeat(64) }) as never,
+      runClaudeReview: async () => { throw new ClaudeReportValidationError(reason, 'diff', report); },
+    });
+    input.write('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}\n');
+    input.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+    input.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'cross_review', arguments: { author: 'codex', kind: 'code', base: 'main', head: 'HEAD' } } })}\n`);
+    await waitForMessages(() => response, 2);
+    input.end(); await done;
+    const result = JSON.parse(response.trim().split('\n')[1]!).result;
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({ status: 'failed', reason, diagnostics: { mode: 'diff', expectedChecks: ['constitution', 'implementation', 'tests', 'reuse'], untrustedReportTail: report.slice(-8192) } });
+    expect(result.structuredContent).not.toHaveProperty('marker');
+    expect(result.structuredContent).not.toHaveProperty('providerOutcome');
+  });
+
   test.each([
     'Claude is configured for an unverified provider route.',
     'Claude report is missing required per-check evidence.',

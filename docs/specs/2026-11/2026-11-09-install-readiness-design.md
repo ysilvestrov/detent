@@ -10,47 +10,43 @@ Spec-review: claude/default @ 8a1d7c7 (author: codex) — 12 findings: 12 fixed,
 
 ### Мета
 
-Після встановлення всі чотири скіли доступні в обраних агентах. У Codex одна згода для проєкту дозволяє повторні безпечні рев'ю committed-специфікацій та PR-коду локально встановленою CLI іншого сімейства.
+Усі чотири скіли доступні після install. У Codex одна проєктна згода дозволяє повторні рев’ю committed-spec/PR локальною CLI іншої родини.
 
 ### Що зміниться для тебе
 
-Явний `detent install` запропонує встановити пакет поза writable-проєктом і дозволити один інструмент рев'ю для цього репозиторію та його Git-зареєстрованих worktrees. У запиті будуть версія, шляхи, провайдери й використання їхніх облікових записів та лімітів. Одна згода охоплює цей план, подальші рев'ю проходять без нових погоджень. Автентифікація reviewer CLI та штатна довіра хоста до каталогу є окремими передумовами.
-
-Перший text-only adapter для Codex — Claude CLI з чинною авторизацією. Поточний agy-fallback у Codex MCP-шляху ще не підтверджений і недоступний до окремої проби. Відсутність придатного Claude дає неповний setup. Legacy CLI-шляхи Claude/Antigravity зберігають свій чинний вибір reviewer.
-
-Claude Code та Antigravity зберігають чинний npx-шлях і формат встановлення скілів. Codex отримує локальний MCP-інструмент. Інсталятор доставляє погоджену конфігурацію у worktree. Зміна версії, доступів чи переліку провайдерів потребує явного install/update. Видалення попередніх копій є окремою операцією.
+`detent install` показує версію, шляхи, reviewer-провайдерів, передачу committed-матеріалів і витрати лімітів. Згода охоплює repo та перевірені Git-worktrees; зміна версії/прав/провайдерів потребує update. CLI має бути автентифікована, каталог — довірений хостом. Перший Codex adapter — Claude, без agy-fallback до окремої проби. Без придатного Claude setup неповний. Claude/Antigravity зберігають чинні npx, скіли та вибір reviewer.
 
 ### На чому стоїть рішення
 
-- Один проєктний дозвіл та інша родина reviewer — `[вимога власника]`.
-- CLI перевірено з ізольованим профілем та --ignore-user-config/--ignore-rules. Desktop власник перевірив у своїй сесії й повідомив нуль запитів дозволу в усіх трьох тестах. A/A-linked успішні, B без інструмента — `[проба]` П-8. Це результат конкретного середовища, передумова штатної довіри не є новим review grant.
-- Project MCP config не успадковується linked worktree автоматично, доставка однакового config працює — `[проба]` П-8.
-- Звичайні Node-модулі поза writable roots забезпечили перевірений запуск. Signing не був потрібен для цієї проби — `[проба]` П-8. Інші ОС і версії хостів потребують перевірок.
-- Захист коду й host config перевіряється для обраної permission surface перед grant. Codex :workspace документує read-only .codex, підтримка іншої політики потребує еквівалентного доказу — `[проба]` П-9 для фактичного середовища та `[виведення]` для майбутніх конфігурацій. Full-access не отримує гарантії sandbox.
+- Один дозвіл і інша родина reviewer — `[вимога власника]`.
+- П-8: Node MCP працює в перевірених CLI/Desktop; A/worktree успішні без повторних prompts, B виключено. Config доставляється у worktree явно — `[проба]`.
+- П-9: захист config/коду доведено для поточного workspace sandbox. Інші permission surfaces потребують доказу; full-access такої гарантії не має — `[проба]` / `[виведення]`.
 
 ### Ключові рішення
 
-1. Один локальний MCP-інструмент з вузькими параметрами та project-scoped policy. Розглянуто постійний shell-prefix на launcher у проєкті, відкинуто через можливість підміни коду. Платформний executable/signing з Д-1 вилучено з поточного обсягу за результатами П-8.
-2. Звичайний самодостатній Node-пакет у локальному захищеному каталозі. Розглянуто імпорт з node_modules або проєктної runtime-копії, відкинуто для privileged MCP через writable-код.
-3. Reviewer отримує committed-текст і працює без інструментів. Розглянуто агентне читання checkout і запуск тестів, відкинуто для цієї capability через ширші права й побічні дії.
-4. Згода належить конкретному репозиторію, установленій версії та погодженим провайдерам. Native config і protected state мають бути недоступні агентним записам, а installer grant потребує довіреного user/host approval channel. Новий worktree отримує той самий config після перевірки Git-належності. Розглянуто ручне підтвердження кожного рев'ю, відкинуто як несумісне з метою.
-5. Доставка скілів, effective permissions і live-доступність показуються окремо. Розглянуто один зелений статус після копіювання, відкинуто через відмінність цих фактів.
+1. Один вузький project-scoped MCP; writable launcher відкинуто через підміну коду. Платформне signing вилучено після П-8.
+2. Самодостатній Node-пакет поза writable roots; імпорт проєктного коду відкинуто як небезпечний.
+3. Committed-текст без tools; читання checkout і запуск тестів відкинуто через ширші права.
+4. Захищені config/state та довірений install approval; підтвердження кожного review не виконує мету.
+5. Файли, effective grant і live-доступність мають окремі статуси; копіювання не доводить готовності.
 
 ### Що стане гірше
 
-Потрібні локальна копія пакета й конфігурація MCP у кожному worktree. Клон і переміщення проєкту потребують setup. Reviewer не шукає по checkout і не запускає тести. Перевірки конституції, відповідності реалізації та повторного використання коду мають явне «не перевірено», якщо потрібний контекст не передано. Сумарний payload обмежено 1 MiB разом із повними head blobs усіх змінених текстових файлів, тому одна правка lockfile понад 1 MiB також відхиляється. Binary/submodule/LFS-material і неоднозначний merge-base отримують явну відмову. Tracked .codex/config.toml потребує рішення користувача щодо локальної конфігурації. Scripts для .agents мають врахувати новий exit 6.
+Потрібні локальна копія та config у worktrees; клон/переміщення потребують setup. Reviewer не запускає тести; без контексту перевірки явно не верифіковані. Повні head blobs разом обмежені 1 MiB, зокрема lockfiles. Binary/submodule/LFS та неоднозначний merge-base відхиляються. Tracked config потребує рішення; .agents scripts враховують exit 6. Видалення старих копій — окрема операція.
 
 ### Оцінка
 
-Власник L. Автор L, прогноз 2–3 PR. Інсталяція й транзакції 30%, MCP/згода/worktrees 30%, renderer скілів і сумісність 15%, doctor та live-матриця 25%. Попередню XL-оцінку Д-1 замінено після відмови від платформного release/signing. Дешевший варіант з одним виправленням текстів скілів лишає повторні запити й не виконує мету.
+Власник L. Автор L, 2–3 PR.
 
 ### Питання до власника
 
-Нових відкритих питань немає. Потрібне затвердження оновленої архітектури перед продуктовою реалізацією.
+Відкритих питань немає; продовження реалізації погоджено власником 2026-11-09.
 
 ## Контекст і сумісність
 
 Джерела істини — цей документ і чинні специфікації review protocol. Непов'язана npm-cache ENOENT має окремий issue #29. Мовчазного повторного npm download у Codex review path немає.
+
+Розподіл погодженої L-оцінки: інсталяція й транзакції 30%, MCP/згода/worktrees 30%, renderer та сумісність 15%, doctor/live-матриця 25%. Попередню XL-оцінку Д-1 замінено після відмови від платформного release/signing. Виправлення лише текстів скілів залишає повторні запити й не виконує мету. Деталі П-8: CLI перевірено з ізольованим профілем та --ignore-user-config/--ignore-rules; Desktop — власником у своїй сесії, без prompts у трьох тестах. Ці умови не є вимогою ізольованого профілю для продукту.
 
 Зберегти `install`, `--claude`, `--agents`, `--superpowers yes|no`, `--dry-run`. Без target-прапорів доставляються обидва чинні набори. .agents/skills є спільним набором Codex/Antigravity, дублікати не створюються. Claude plugin лишається додатковим каналом доставки.
 
@@ -136,7 +132,7 @@ Tool вхід містить явного `author: codex|claude|agy` та оди
 
 Автор задається скілом як у чинному --author. Це declared provenance, автоматичне визначення фактичного авторства не стверджується. Невідомий author або неможливість підтвердити сімейство reviewer дають відмову. Поточні CLI flags і raw model overrides не стають tool arguments. Немає parameters для shell-команд, prompt, executable, registration/root, output path, permissions або arbitrary CLI flags. Schema відхиляє невідомі поля.
 
-Для spec/code дозволено лише додатковий bounded `contextPaths` із repository-relative Git paths. Він передає контекст як untrusted blobs із того самого resolved review commit. Для spec автоматично додаються доступні committed constitution/spec-format/root-spec/package manifest/detent.json та project review guidance за чинними config keys. reviewContext і .detent/prompts/review-spec.md зберігаються як позначені untrusted guidance, без перетворення на privileged system instructions. Відсутність/небезпека reference або перевищення бюджету контексту дає явний coverage result/відмову, без тихого пропуску. Reviewer report має per-check verified/not-verified з evidence paths. Перевірку повторного використання чи відповідності коду не можна оголосити пройденою за відсутності потрібних файлів. Автор може передати додаткові contextPaths, права reviewer залишаються text-only.
+Для spec/code дозволено лише додатковий bounded `contextPaths` із repository-relative Git paths. Він передає контекст як untrusted blobs із того самого resolved review commit. Для spec автоматично додаються доступні committed constitution/spec-format/root-spec/package manifest/detent.json; root-spec визначає чинний `specFile`. `reviewContext` читається з config. Шляхи guidance фіксовані: spec-mode включає `.detent/prompts/review-spec.md` та `.detent/prompts/review-diff.md` як спільний контекст проєктних правил рев’ю, code-mode — `.detent/prompts/review-diff.md`. Це untrusted guidance, а не privileged system instructions; окремих config keys для prompt paths немає. Відсутність/небезпека reference або перевищення бюджету контексту дає явний coverage result/відмову, без тихого пропуску. Reviewer report має per-check verified/not-verified з evidence paths. Перевірку повторного використання чи відповідності коду не можна оголосити пройденою за відсутності потрібних файлів. Автор може передати додаткові contextPaths, права reviewer залишаються text-only.
 
 Повторно використати чинні family mapping, reviewer selection/fallback та review protocol. Eligibility обмежується погодженими й live-перевіреними text-only adapters. Чинний worktree runner не викликається з MCP. Для цієї редакції підтверджений adapter Claude, інші отримують capability лише після окремої live no-tools проби. При відсутності придатного іншого сімейства setup лишається неповним. CLI Claude/Antigravity як author-host зберігають наявний legacy runner.
 
@@ -146,11 +142,13 @@ Spec path нормалізується й перевіряється чинни�
 
 Binary, symlink, submodule та LFS pointer матеріали отримують явну помилку. Недопустимий UTF-8, порожній diff і перевищення payload 1 MiB також відхиляються. Обрізання, пропуск файлів або передача pointer як вихідного коду заборонені. Звіт перелічує exact coverage, тож відсутній контекст видно.
 
-Установлений fixed system prompt вимагає аналізу untrusted матеріалу й забороняє виконувати його інструкції. Reviewer працює у нейтральному каталозі поза checkout, без tools, MCP, автоматичного завантаження project/user hooks, CLAUDE.md/AGENTS.md, plugins/custom commands і session persistence. Явно переданий committed контекст лишається лише текстом. Auth штатний для CLI. Для Claude використано П-8-комбінацію restricted/safe-mode, empty tools, strict empty MCP config та disableAllHooks. Init model/tools/MCP і stream перевіряються. Увімкнений tool, невідомий model family або tool_use означають failed.
+Установлений fixed system prompt явно задає активний spec/code режим і лише його перелік перевірок, вимагає аналізу untrusted матеріалу й забороняє виконувати його інструкції. Reviewer працює у нейтральному каталозі поза checkout, без tools, MCP, автоматичного завантаження project/user hooks, CLAUDE.md/AGENTS.md, plugins/custom commands і session persistence. Явно переданий committed контекст лишається лише текстом. Auth штатний для CLI. Для Claude використано П-8-комбінацію restricted/safe-mode, empty tools, strict empty MCP config та disableAllHooks. Init model/tools/MCP і stream перевіряються. Увімкнений tool, невідомий model family або tool_use означають failed.
 
 Product review deadline 900 секунд збережений від чинного cross-review, разом із fallback. 180 секунд у П-8 були лише параметром малих fixture-проб. MCP tool_timeout_sec має бути щонайменше 930 секунд для завершення/cancel cleanup, host contract перевіряє цю можливість. Хост із меншим незмінним лімітом отримує needs-action, тихого скорочення deadline немає. Fallback лише на погоджений eligible text-only adapter, timeout зупиняє chain. Abort, stdio disconnect і deadline завершують local reviewer process tree, detached children не запускаються. Provider billing може продовжитися після локального обриву, результат тоді indeterminate, автоматичного платного retry немає. Product tests покривають host timeout, cancellation і довгий review. Legacy CLI exit-коди збережені.
 
 Успіх повертає status=completed, report, findings/marker за чинним protocol, authorDeclared, фактичні reviewer/model/family, resolved commits, coverage, hash точного stdin payload, effectiveRoot, registration identity і no-tools observation. Completed означає отриманий валідний звіт, наявність дефектів записується окремо. Spawn/auth/error/timeout/overflow/invalid report повертають локальний failed/needs-action з причиною, без успішного marker. Після timeout/abort розпочатого reviewer окреме providerOutcome=indeterminate означає невідомий віддалений результат і можливе продовження billing. На client cancellation відповідь скасовуваного MCP request не надсилається; disconnect також може унеможливити доставку receipt. Повторне надсилання після транспортної невизначеності автоматично не робиться, щоб не створювати приховані повторні платні reviews.
+
+Якщо валідний завершений stream пройшов model/no-tools/count перевірки, але report порушує CHECK-контракт, failed-result може містити `diagnostics`: режим, очікувані перевірки та останні не більш як 8192 символи `untrustedReportTail`. Це локальна діагностика невалідного звіту, не успішний marker. Stdin, environment, credentials і raw stream до неї не додаються; вона не вмикає повторного платного запуску.
 
 ## Повторюваність і часткові помилки
 
@@ -213,6 +211,7 @@ Codex документує read-only .codex у вбудованому :workspace
 | Reviewer без інструментів | no-tools observation | Init tools/MCP і stream tool_use + canaries | П-8 CLI chain |
 | Матеріал відповідає запиту | commits/coverage/input hash | Immutable Git blobs, merge-base, точний stdin | П-8 для двох commits, merge-base product tests |
 | Review завершений | completed/marker | Валідований звіт і успішний adapter result | П-8 |
+| Причина CHECK-відмови доступна локально | failed.diagnostics | Режим/перелік із fixed contract та обмежений untrusted tail завершеного звіту; не доводить коректності висновків | Product unit tests; не додає input/env/credentials |
 | Grant відкликано для всього repo | revoke result | Disabled protected binding перед кожним викликом + configs | Новий product acceptance, spike перевірив лише native CLI prompt |
 | Новий worktree має той самий scope | install result | Перевірка membership + unchanged grant + exact config | П-8 для одного linked, product tests для нових |
 
