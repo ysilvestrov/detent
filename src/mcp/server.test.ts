@@ -23,12 +23,15 @@ const admitted = (root: string, roots = [root]) => ({
 });
 
 describe('serveMcp', () => {
-  test('forwards bounded untrusted invalid-report diagnostics only as a failed result', async () => {
+  test.each([
+    ['CHECK: format | not-verified | evidence: []\nCROSS-REVIEW-RESULT: 0 findings', 'Claude report has invalid or duplicate check evidence.'],
+    ['Review complete.', 'output does not end with a CROSS-REVIEW-RESULT line'],
+  ])('forwards bounded untrusted invalid-report diagnostics only as a failed result: %s', async (ending, reason) => {
     const input = new PassThrough(); const output = new PassThrough();
     let response = ''; output.on('data', (chunk) => { response += chunk.toString(); });
     const root = repo();
-    const report = `${'x'.repeat(9000)}\nCHECK: format | not-verified | evidence: []\nCROSS-REVIEW-RESULT: 0 findings`;
-    const reason = 'Claude report has invalid or duplicate check evidence.';
+    const expectedTail = 'x'.repeat(8191 - ending.length) + '\n' + ending;
+    const report = `discarded-prefix${expectedTail}`;
     const done = serveMcp({ registrationPath: 'registration', cwd: root, identity: { version: '1.0.0', digest: 'a'.repeat(64) }, neutralCwd: neutral(), input, output }, {
       readAdmission: () => admitted(root) as never,
       prepareReview: () => ({ mode: 'diff', author: 'codex', commits: { head: 'b'.repeat(40) }, coverage: [], text: 'payload', inputSha256: 'c'.repeat(64) }) as never,
@@ -41,7 +44,7 @@ describe('serveMcp', () => {
     input.end(); await done;
     const result = JSON.parse(response.trim().split('\n')[1]!).result;
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toEqual({ status: 'failed', reason, diagnostics: { mode: 'diff', expectedChecks: ['constitution', 'implementation', 'tests', 'reuse'], untrustedReportTail: report.slice(-8192) } });
+    expect(result.structuredContent).toEqual({ status: 'failed', reason, diagnostics: { mode: 'diff', expectedChecks: ['constitution', 'implementation', 'tests', 'reuse'], untrustedReportTail: expectedTail } });
     expect(result.structuredContent).not.toHaveProperty('marker');
     expect(result.structuredContent).not.toHaveProperty('providerOutcome');
   });

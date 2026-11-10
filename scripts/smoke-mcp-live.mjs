@@ -10,7 +10,9 @@ const scenarioPath = process.argv[2];
 assert(scenarioPath && process.argv.length === 3, 'usage: node scripts/smoke-mcp-live.mjs <scenario.json>');
 const scenario = JSON.parse(await readFile(scenarioPath, 'utf8'));
 assert(process.platform === 'win32', 'live MCP smoke requires Windows for the installed Claude adapter and owned-process cleanup');
-const required = ['packageRoot', 'repoRoot', 'mainRoot', 'gitCommonDir', 'gitExecutable', 'claudeExecutable', 'base', 'head', 'spec', 'outputDir'];
+const modes = Object.hasOwn(scenario, 'modes') ? scenario.modes : ['spec', 'code'];
+assert(Array.isArray(modes) && modes.length >= 1 && modes.length <= 2 && modes.every((mode) => mode === 'spec' || mode === 'code') && new Set(modes).size === modes.length, 'modes must be a nonempty, unique subset of [spec, code]');
+const required = ['packageRoot', 'repoRoot', 'mainRoot', 'gitCommonDir', 'gitExecutable', 'claudeExecutable', 'head', 'outputDir', ...(modes.includes('spec') ? ['spec'] : []), ...(modes.includes('code') ? ['base'] : [])];
 for (const key of required) assert(typeof scenario[key] === 'string' && scenario[key].length, `scenario requires ${key}`);
 for (const key of ['packageRoot', 'repoRoot', 'mainRoot', 'gitCommonDir', 'gitExecutable', 'claudeExecutable', 'outputDir']) assert(isAbsolute(scenario[key]), `scenario ${key} must be absolute`);
 assert(Array.isArray(scenario.contextPaths) && scenario.contextPaths.every((p) => typeof p === 'string'), 'contextPaths must be an array of repository paths');
@@ -22,7 +24,7 @@ const assertions = [];
 const results = {};
 await mkdir(scenario.outputDir, { recursive: true });
 const evidencePath = join(scenario.outputDir, 'live-mcp-evidence.json');
-const evidence = { status: 'running', createdAt: new Date().toISOString(), installedPackage: { root: scenario.packageRoot, version: identity.version, digest: identity.digest }, sourceCommit: scenario.head, assertions, results };
+const evidence = { status: 'running', requestedModes: [...modes], createdAt: new Date().toISOString(), installedPackage: { root: scenario.packageRoot, version: identity.version, digest: identity.digest }, sourceCommit: scenario.head, assertions, results };
 const persist = () => writeFile(evidencePath, JSON.stringify(evidence, null, 2));
 const safeToolResult = (result) => ({
   isError: result?.isError === true,
@@ -100,30 +102,32 @@ try {
   phase = 'tools/list';
   const listed = await request(1, 'tools/list');
   assert(listed.tools?.length === 1 && listed.tools[0].name === 'cross_review', 'tools/list did not return exactly cross_review'); assertions.push('tools/list exactly cross_review'); await persist();
-  const specArgs = { author: 'codex', kind: 'spec', path: scenario.spec, revision: scenario.head, contextPaths: scenario.contextPaths };
-  phase = 'spec review'; activeCall = 'spec';
-  results.spec = { status: 'running' }; await persist();
-  const specResult = await request(2, 'tools/call', { name: 'cross_review', arguments: specArgs }, callTimeout);
-  results.spec = { status: 'received', toolResult: safeToolResult(specResult) }; await persist();
-  checkRun();
-  const specReceipt = checkReceipt(specResult, { author: 'codex', head: scenario.head, root: scenario.repoRoot, identity, markerPrefix: 'Spec-review:' });
-  results.spec = { status: 'completed', assertions: ['completed', 'claude/Anthropic haiku', 'no tools', 'effective root', 'head', 'marker', 'legacy receipt provenance'], receipt: specReceipt, report: specResult.content[0].text }; await persist();
-  activeCall = undefined;
-  phase = 'code review'; activeCall = 'code';
-  results.code = { status: 'running' }; await persist();
-  const codeResult = await request(3, 'tools/call', { name: 'cross_review', arguments: { author: 'codex', kind: 'code', base: scenario.base, head: scenario.head, contextPaths: scenario.contextPaths } }, callTimeout);
-  results.code = { status: 'received', toolResult: safeToolResult(codeResult) }; await persist();
-  checkRun();
-  const codeReceipt = checkReceipt(codeResult, { author: 'codex', head: scenario.head, base: scenario.base, root: scenario.repoRoot, identity, markerPrefix: 'Cross-review:' });
-  results.code = { status: 'completed', assertions: ['completed', 'claude/Anthropic haiku', 'no tools', 'effective root', 'base/head', 'marker', 'legacy receipt provenance'], receipt: codeReceipt, report: codeResult.content[0].text }; await persist();
-  activeCall = undefined;
+  let callId = 2;
+  for (const mode of modes) {
+    phase = `${mode} review`; activeCall = mode;
+    results[mode] = { status: 'running' }; await persist();
+    const args = mode === 'spec'
+      ? { author: 'codex', kind: 'spec', path: scenario.spec, revision: scenario.head, contextPaths: scenario.contextPaths }
+      : { author: 'codex', kind: 'code', base: scenario.base, head: scenario.head, contextPaths: scenario.contextPaths };
+    const result = await request(callId++, 'tools/call', { name: 'cross_review', arguments: args }, callTimeout);
+    results[mode] = { status: 'received', toolResult: safeToolResult(result) }; await persist();
+    checkRun();
+    const expected = mode === 'spec'
+      ? { author: 'codex', head: scenario.head, root: scenario.repoRoot, identity, markerPrefix: 'Spec-review:' }
+      : { author: 'codex', head: scenario.head, base: scenario.base, root: scenario.repoRoot, identity, markerPrefix: 'Cross-review:' };
+    const receipt = checkReceipt(result, expected);
+    results[mode] = { status: 'completed', assertions: ['completed', 'claude/Anthropic haiku', 'no tools', 'effective root', mode === 'spec' ? 'head' : 'base/head', 'marker', 'legacy receipt provenance'], receipt, report: result.content[0].text };
+    assertions.push(`${mode} review completed with matching provenance`);
+    await persist();
+    activeCall = undefined;
+  }
   phase = 'shutdown';
   child.stdin.end();
   await waitForClose(10_000);
   checkRun();
   assert(exitInfo?.code === 0 && !stderr && !lines, `child exit/stderr invalid: ${JSON.stringify(exitInfo)} ${stderr}`);
   evidence.status = 'completed'; await persist();
-  console.log(`live MCP acceptance: passed; evidence: ${evidencePath}`);
+  console.log(`live MCP acceptance: passed modes=${modes.join(',')}; evidence: ${evidencePath}`);
 } catch (error) {
   evidence.status = 'failed';
   evidence.failure = { phase, reason: error instanceof Error ? error.name : 'Error' };
