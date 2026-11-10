@@ -27,12 +27,12 @@ export async function mcp(argv: readonly string[], io: McpCommandIO): Promise<nu
   }
   const registrationPath = argv[1] as string;
   try {
-    const packageRoot = realpathSync(fileURLToPath(new URL('../../', import.meta.url)));
+    const packageRoot = realpathSync.native(fileURLToPath(new URL('../../', import.meta.url)));
     const identity = snapshotPackage(packageRoot).contract;
     const admission = await readAdmission(registrationPath, io.cwd, identity);
     await assertMcpDirectory(admission, packageRoot, 'installed package root');
-    await assertMcpDirectory(admission, realpathSync(tmpdir()), 'neutral reviewer parent');
-    const neutralCwd = realpathSync(mkdtempSync(join(tmpdir(), 'detent-mcp-')));
+    await assertMcpDirectory(admission, realpathSync.native(tmpdir()), 'neutral reviewer parent');
+    const neutralCwd = realpathSync.native(mkdtempSync(join(tmpdir(), 'detent-mcp-')));
     await serveMcp({ registrationPath, cwd: io.cwd, identity, neutralCwd, packageRoot, input: io.input, output: io.output, err: io.err });
     return 0;
   } catch (error) {

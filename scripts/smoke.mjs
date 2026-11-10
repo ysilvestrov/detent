@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const base = realpathSync(mkdtempSync(join(tmpdir(), 'detent-smoke-')));
+const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'detent-smoke-')));
 const pack = join(base, 'pack');
 const consumer = join(base, 'consumer');
 const home = join(base, 'home');
@@ -119,11 +119,11 @@ writeFileSync(mcpRegistration, JSON.stringify({
   projectId: 'smoke-fixture',
   revision: 1,
   enabled: true,
-  mainRoot: realpathSync(mcpRepo),
-  gitCommonDir: realpathSync(join(mcpRepo, '.git')),
-  gitExecutable: realpathSync(join(gitExecPath, process.platform === 'win32' ? 'git.exe' : 'git')),
-  capabilities: [{ version: identity.version, digest: identity.digest, reviewers: [{ id: 'claude', executable: realpathSync(process.execPath), model: 'claude-haiku-5-5' }] }],
-  worktrees: [{ root: realpathSync(mcpRepo), configPath: join(realpathSync(mcpRepo), '.codex', 'config.toml'), version: identity.version, digest: identity.digest, state: 'active' }],
+  mainRoot: realpathSync.native(mcpRepo),
+  gitCommonDir: realpathSync.native(join(mcpRepo, '.git')),
+  gitExecutable: realpathSync.native(join(gitExecPath, process.platform === 'win32' ? 'git.exe' : 'git')),
+  capabilities: [{ version: identity.version, digest: identity.digest, reviewers: [{ id: 'claude', executable: realpathSync.native(process.execPath), model: 'claude-haiku-5-5' }] }],
+  worktrees: [{ root: realpathSync.native(mcpRepo), configPath: join(realpathSync.native(mcpRepo), '.codex', 'config.toml'), version: identity.version, digest: identity.digest, state: 'active' }],
 }));
 const mcpInput = [
   { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'smoke', version: '1' } } },
