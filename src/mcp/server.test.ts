@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { PassThrough } from 'node:stream';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,6 +22,74 @@ const admitted = (root: string, roots = [root]) => ({
 });
 
 describe('serveMcp', () => {
+  test('cancels an active review while another call is preparing and waits for cleanup', async () => {
+    const input = new PassThrough(); const output = new PassThrough();
+    let response = '';
+    output.on('data', (chunk) => { response += chunk.toString(); });
+    const root = repo();
+    let reviewStarted!: () => void;
+    const started = new Promise<void>((resolve) => { reviewStarted = resolve; });
+    let secondPreparing!: () => void;
+    const preparing = new Promise<void>((resolve) => { secondPreparing = resolve; });
+    let preparations = 0;
+    let cleaned = false;
+    const done = serveMcp({ registrationPath: 'registration', cwd: root, identity: { version: '1.0.0', digest: 'a'.repeat(64) }, neutralCwd: neutral(), input, output }, {
+      readAdmission: () => admitted(root) as never,
+      prepareReview: (_root, _git, _request, options) => {
+        preparations += 1;
+        if (preparations === 1) return { mode: 'spec', author: 'codex', commits: { head: 'b'.repeat(40) }, coverage: [], text: 'payload', inputSha256: 'c'.repeat(64) } as never;
+        secondPreparing();
+        return new Promise((_, reject) => options?.signal?.addEventListener('abort', () => reject(new Error('preparation aborted')), { once: true }));
+      },
+      runClaudeReview: ({ signal }) => new Promise((_, reject) => {
+        reviewStarted();
+        signal?.addEventListener('abort', () => setTimeout(() => { cleaned = true; reject(new Error('review cancelled')); }, 10), { once: true });
+      }),
+    });
+    const send = (message: unknown) => input.write(`${JSON.stringify(message)}\n`);
+    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05' } });
+    send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    const args = { author: 'codex', kind: 'spec', path: 'docs/specs/2026-11/x.md', revision: 'HEAD' };
+    send({ jsonrpc: '2.0', id: 'first', method: 'tools/call', params: { name: 'cross_review', arguments: args } });
+    await started;
+    send({ jsonrpc: '2.0', id: 'second', method: 'tools/call', params: { name: 'cross_review', arguments: args } });
+    await preparing;
+    send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 'first' } });
+    await waitForMessages(() => response, 2);
+    expect(cleaned).toBe(true);
+    expect(response).toContain('review cancelled');
+    send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 'second' } });
+    await waitForMessages(() => response, 3);
+    input.end(); await done;
+  });
+
+  test('does not launch Claude after the shared deadline expires during preparation', async () => {
+    const input = new PassThrough(); const output = new PassThrough();
+    let response = ''; output.on('data', (chunk) => { response += chunk.toString(); });
+    const root = repo();
+    let release!: (value: unknown) => void;
+    let preparing!: () => void;
+    const entered = new Promise<void>((resolve) => { preparing = resolve; });
+    const baseTime = Date.now(); let clock = baseTime;
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    let launched = 0;
+    const done = serveMcp({ registrationPath: 'registration', cwd: root, identity: { version: '1.0.0', digest: 'a'.repeat(64) }, neutralCwd: neutral(), input, output }, {
+      readAdmission: () => admitted(root) as never,
+      prepareReview: () => new Promise((resolve) => { release = resolve; preparing(); }) as never,
+      runClaudeReview: async () => { launched += 1; throw new Error('review should not start'); },
+    });
+    input.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05' } })}\n`);
+    input.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+    input.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'cross_review', arguments: { author: 'codex', kind: 'spec', path: 'docs/specs/2026-11/x.md', revision: 'HEAD' } } })}\n`);
+    await entered;
+    clock = baseTime + 900_001;
+    release({ mode: 'spec', author: 'codex', commits: { head: 'b'.repeat(40) }, coverage: [], text: 'payload', inputSha256: 'c'.repeat(64) });
+    for (let i = 0; i < 100 && response.trim().split('\n').filter(Boolean).length < 2; i++) await new Promise<void>((resolve) => setImmediate(resolve));
+    now.mockRestore();
+    input.end(); await done;
+    expect(launched).toBe(0);
+    expect(JSON.parse(response.trim().split('\n')[1]!).result.structuredContent).toMatchObject({ status: 'failed', reason: expect.stringMatching(/deadline/) });
+  });
   test('initializes, lists the fixed tool, and returns factual success receipts', async () => {
     const input = new PassThrough();
     const output = new PassThrough();
@@ -42,6 +110,9 @@ describe('serveMcp', () => {
     const messages = response.trim().split('\n').map((line) => JSON.parse(line));
     expect(messages.map((message) => message.id)).toEqual([1, 2]);
     expect(messages[1].result.structuredContent).toMatchObject({ status: 'completed', authorDeclared: 'codex', reviewer: { id: 'claude', model: 'claude-haiku-5-5', family: 'anthropic' }, effectiveRoot: root, projectId: 'p', revision: 3 });
+    const legacy = messages[1].result.content.map((item: { type: string; text: string }) => item.text);
+    expect(legacy[0]).toBe('Findings\nCROSS-REVIEW-RESULT: 1 finding');
+    expect(JSON.parse(legacy[1])).toMatchObject({ status: 'completed', marker: expect.stringContaining('Spec-review:'), commits: { head: 'b'.repeat(40) }, inputSha256: 'c'.repeat(64), coverage: [] });
   });
 
   test('allows startup with an absent offline registered worktree while preserving current admission', async () => {
@@ -230,6 +301,8 @@ describe('serveMcp', () => {
     output.on('data', (chunk) => { response += chunk.toString(); });
     const root = repo();
     const starts = new Set<string>();
+    let firstReady!: () => void;
+    const firstStarted = new Promise<void>((resolve) => { firstReady = resolve; });
     let started!: () => void;
     const bothStarted = new Promise<void>((resolve) => { started = resolve; });
     let finishSecond!: (result: { report: string; findings: number; model: string; tools: []; mcpServers: []; toolUseCount: 0 }) => void;
@@ -239,6 +312,7 @@ describe('serveMcp', () => {
       runClaudeReview: ({ signal }) => new Promise((resolve, reject) => {
         const id = starts.size === 0 ? 'first' : 'second';
         starts.add(id);
+        if (starts.size === 1) firstReady();
         if (starts.size === 2) started();
         if (id === 'second') finishSecond = resolve;
         signal?.addEventListener('abort', () => reject(new Error('review cancelled')), { once: true });
@@ -248,6 +322,7 @@ describe('serveMcp', () => {
     input.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
     const args = { author: 'codex', kind: 'spec', path: 'docs/specs/2026-11/x.md', revision: 'HEAD' };
     input.write(`${JSON.stringify({ jsonrpc: '2.0', id: 'a', method: 'tools/call', params: { name: 'cross_review', arguments: args } })}\n`);
+    await firstStarted;
     input.write(`${JSON.stringify({ jsonrpc: '2.0', id: 'b', method: 'tools/call', params: { name: 'cross_review', arguments: args } })}\n`);
     input.write(`${JSON.stringify({ jsonrpc: '2.0', id: 'a', method: 'tools/call', params: { name: 'cross_review', arguments: args } })}\n`);
     await bothStarted;

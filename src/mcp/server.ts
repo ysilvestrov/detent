@@ -1,5 +1,5 @@
 import type { Readable, Writable } from 'node:stream';
-import { realpathSync, statSync } from 'node:fs';
+import { realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { readAdmission as readAdmissionDefault, type RuntimeIdentity } from './registration.js';
 import { parseReviewRequest, prepareReview as prepareReviewDefault, type PreparedReview, type ReviewRequest } from './input.js';
@@ -45,27 +45,28 @@ const tool = {
 };
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
+const pathKey = (path: string): string => process.platform === 'win32' ? path.toLowerCase() : path;
 const contains = (parent: string, target: string): boolean => {
   const child = relative(parent, target);
   return child === '' || (child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child));
 };
-function canonicalStoredPath(path: string): string {
+async function canonicalStoredPath(path: string): Promise<string> {
   try {
-    return realpathSync(path);
+    return await realpath(path);
   } catch (error) {
     if (typeof error !== 'object' || error === null || !('code' in error) || error.code !== 'ENOENT') throw error;
     const parent = dirname(path);
     if (parent === path) return path;
-    return join(canonicalStoredPath(parent), basename(path));
+    return join(await canonicalStoredPath(parent), basename(path));
   }
 }
 
-export function assertMcpDirectory(admission: ReturnType<typeof readAdmissionDefault>, path: string, label: string): string {
+export async function assertMcpDirectory(admission: Awaited<ReturnType<typeof readAdmissionDefault>>, path: string, label: string): Promise<string> {
   if (!isAbsolute(path) || resolve(path) !== path) throw new Error(`${label} must be a canonical absolute directory`);
-  const canonical = realpathSync(path);
-  if (canonical !== path || !statSync(canonical).isDirectory()) throw new Error(`${label} must be a canonical directory`);
-  const roots = admission.registration.worktrees.map((worktree) => canonicalStoredPath(worktree.root));
-  const protectedRoots = [...roots, realpathSync(admission.registration.gitCommonDir)];
+  const canonical = await realpath(path);
+  if (pathKey(canonical) !== pathKey(path) || !(await stat(canonical)).isDirectory()) throw new Error(`${label} must be a canonical directory`);
+  const roots = await Promise.all(admission.registration.worktrees.map((worktree) => canonicalStoredPath(worktree.root)));
+  const protectedRoots = [...roots, await realpath(admission.registration.gitCommonDir)];
   if (protectedRoots.some((root) => contains(root, canonical))) throw new Error(`${label} is inside a registered worktree or Git metadata`);
   return canonical;
 }
@@ -74,9 +75,9 @@ export async function serveMcp(options: McpServerOptions, io: McpServerIO = {}):
   const readAdmission = io.readAdmission ?? readAdmissionDefault;
   const prepareReview = io.prepareReview ?? prepareReviewDefault;
   const runReview = io.runClaudeReview ?? runClaudeReviewDefault;
-  const startupAdmission = readAdmission(options.registrationPath, options.cwd, options.identity);
-  assertMcpDirectory(startupAdmission, options.neutralCwd, 'neutral reviewer cwd');
-  if (options.packageRoot) assertMcpDirectory(startupAdmission, options.packageRoot, 'installed package root');
+  const startupAdmission = await readAdmission(options.registrationPath, options.cwd, options.identity);
+  await assertMcpDirectory(startupAdmission, options.neutralCwd, 'neutral reviewer cwd');
+  if (options.packageRoot) await assertMcpDirectory(startupAdmission, options.packageRoot, 'installed package root');
   let buffer = Buffer.alloc(0);
   let discardingOversize = false;
   let initialized = false;
@@ -143,6 +144,8 @@ export async function serveMcp(options: McpServerOptions, io: McpServerIO = {}):
     if (value.method === 'tools/list') { send({ jsonrpc: '2.0', id, result: { tools: [tool] } }); return; }
     if (value.method !== 'tools/call') { send({ jsonrpc: '2.0', id, error: { code: -32601, message: 'Method not found' } }); return; }
     const controller = new AbortController();
+    const deadline = Date.now() + 900_000;
+    const deadlineTimer = setTimeout(() => controller.abort(), 900_000);
     active.set(key, controller);
     const job = (async () => {
       let stage: 'input' | 'admission' | 'eligibility' | 'prepare' | 'review' = 'input';
@@ -150,9 +153,11 @@ export async function serveMcp(options: McpServerOptions, io: McpServerIO = {}):
         if (!record(value.params) || value.params.name !== 'cross_review') throw new Error('unknown tool');
         const request: ReviewRequest = parseReviewRequest(value.params.arguments);
         stage = 'admission';
-        const current = readAdmission(options.registrationPath, options.cwd, options.identity);
-        assertMcpDirectory(current, options.neutralCwd, 'neutral reviewer cwd');
-        if (options.packageRoot) assertMcpDirectory(current, options.packageRoot, 'installed package root');
+        const current = await readAdmission(options.registrationPath, options.cwd, options.identity, { signal: controller.signal, deadline });
+        if (controller.signal.aborted) throw new Error('review cancelled or deadline expired during admission');
+        await assertMcpDirectory(current, options.neutralCwd, 'neutral reviewer cwd');
+        if (options.packageRoot) await assertMcpDirectory(current, options.packageRoot, 'installed package root');
+        if (controller.signal.aborted) throw new Error('review cancelled or deadline expired during admission');
         const reviewer = current.capability.reviewers.find((item) => item.id === 'claude');
         if (!reviewer) throw new Error('no eligible text-only reviewer is admitted');
         if (familyOfAuthor(request.author) === ADAPTERS.claude.family) {
@@ -160,9 +165,12 @@ export async function serveMcp(options: McpServerOptions, io: McpServerIO = {}):
           throw new Error('no eligible reviewer from another model family');
         }
         stage = 'prepare';
-        const prepared: PreparedReview = prepareReview(current.root, current.gitExecutable, request);
+        const prepared: PreparedReview = await prepareReview(current.root, current.gitExecutable, request, { signal: controller.signal, deadline });
+        if (controller.signal.aborted) throw new Error('review cancelled or deadline expired during preparation');
         stage = 'review';
-        const result: ClaudeReviewResult = await runReview({ reviewer, text: prepared.text, cwd: options.neutralCwd, signal: controller.signal });
+        const timeoutMs = deadline - Date.now();
+        if (timeoutMs <= 0) throw new Error('review deadline expired before reviewer start');
+        const result: ClaudeReviewResult = await runReview({ reviewer, text: prepared.text, coverage: prepared.coverage, mode: prepared.mode, cwd: options.neutralCwd, signal: controller.signal, timeoutMs });
         if (controller.signal.aborted) throw new Error('review cancelled');
         const verdict = classifyResult(result.report);
         if (verdict.kind !== 'ok' || verdict.findings !== result.findings || result.tools.length !== 0 || result.mcpServers.length !== 0 || result.toolUseCount !== 0) throw new Error('reviewer returned an invalid or non-text-only result');
@@ -177,12 +185,13 @@ export async function serveMcp(options: McpServerOptions, io: McpServerIO = {}):
           runtimeIdentity: options.identity,
           noTools: { tools: result.tools, mcpServers: result.mcpServers, toolUseCount: result.toolUseCount },
         };
-        send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: result.report }], structuredContent: receipt } });
+        send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: result.report }, { type: 'text', text: JSON.stringify(receipt) }], structuredContent: receipt } });
       } catch (error) {
         const reason = messageOf(error);
         const status = stage === 'admission' ? 'needs-action' : 'failed';
         send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: reason }], structuredContent: { status, reason }, isError: true } });
       } finally {
+        clearTimeout(deadlineTimer);
         active.delete(key);
       }
     })();

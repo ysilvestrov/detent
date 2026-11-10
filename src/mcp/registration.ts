@@ -1,7 +1,7 @@
-import { execFileSync } from 'node:child_process';
-import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { lstat, readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { safeComponent } from '../runtime/contract.js';
+import { execGitFile } from './git-process.js';
 
 export type ReviewerId = 'claude';
 export interface Reviewer { id: ReviewerId; executable: string; model?: string }
@@ -20,6 +20,14 @@ export interface ProjectRegistration {
 }
 export interface RuntimeIdentity { version: string; digest: string }
 export interface Admission { registration: ProjectRegistration; capability: Capability; root: string; gitExecutable: string }
+export interface AdmissionOptions { signal?: AbortSignal; deadline?: number }
+function remaining(options: AdmissionOptions): number | undefined {
+  if (options.signal?.aborted) throw new Error('admission was aborted');
+  if (options.deadline === undefined) return undefined;
+  const left = options.deadline - Date.now();
+  if (left <= 0) throw new Error('review deadline expired during admission');
+  return left;
+}
 
 const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?(?:\+[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?$/;
 const HASH = /^[a-f0-9]{64}$/;
@@ -66,7 +74,7 @@ export function parseRegistration(value: unknown): ProjectRegistration {
     return { version: entry.version as string, digest: entry.digest as string, reviewers };
   });
   const capabilityKeys = capabilities.map(({ version, digest }) => `${version}/${digest}`);
-  if (new Set(capabilityKeys).size !== capabilityKeys.length || new Set(capabilities.map(({ version }) => version)).size !== capabilities.length) throw new Error('duplicate or conflicting registration capability');
+  if (new Set(capabilityKeys).size !== capabilityKeys.length) throw new Error('duplicate or conflicting registration capability');
 
   const worktrees = value.worktrees.map((entry): RegisteredWorktree => {
     if (!object(entry)) throw new Error('invalid registration worktree');
@@ -107,73 +115,81 @@ export function gitEnvironment(): NodeJS.ProcessEnv {
     GIT_CONFIG_COUNT: '0',
     GIT_OPTIONAL_LOCKS: '0',
     GIT_TERMINAL_PROMPT: '0',
+    GIT_NO_LAZY_FETCH: '1',
+    GIT_NO_REPLACE_OBJECTS: '1',
+    GIT_ALLOW_PROTOCOL: '',
   };
 }
 
-function git(cwd: string, executable: string, args: string[]): string {
+async function git(cwd: string, executable: string, args: string[], options: AdmissionOptions): Promise<string> {
   const env = gitEnvironment();
-  return execFileSync(executable, args, { cwd, env, encoding: 'utf8', shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const stdout = await execGitFile(executable, ['-c', 'protocol.allow=never', ...args], { cwd, env, maxBuffer: 1024 * 1024, signal: options.signal, timeout: remaining(options) });
+  remaining(options);
+  return stdout.toString('utf8').trim();
 }
 
-function checkedExecutable(path: string, label: string): string {
-  const stat = lstatSync(path);
-  const canonical = realpathSync(path);
-  if (!stat.isFile() || stat.nlink !== 1 || canonical !== path) throw new Error(`${label} must be a canonical regular file without links`);
-  return canonical;
+async function checkedExecutable(path: string, label: string): Promise<string> {
+  const stat = await lstat(path);
+  const canonical = await realpath(path);
+  if (!stat.isFile() || stat.nlink !== 1 || pathKey(canonical) !== pathKey(path)) throw new Error(`${label} must be a canonical regular file without links`);
+  return path;
 }
 
-function gitPath(cwd: string, executable: string, arg: string): string {
-  const raw = git(cwd, executable, ['rev-parse', arg]);
-  return realpathSync(isAbsolute(raw) ? raw : resolve(cwd, raw));
+async function gitPath(cwd: string, executable: string, arg: string, options: AdmissionOptions): Promise<string> {
+  const raw = await git(cwd, executable, ['rev-parse', arg], options);
+  return realpath(isAbsolute(raw) ? raw : resolve(cwd, raw));
 }
 
-export function readAdmission(registrationPath: string, cwd: string, identity: RuntimeIdentity): Admission {
+export async function readAdmission(registrationPath: string, cwd: string, identity: RuntimeIdentity, options: AdmissionOptions = {}): Promise<Admission> {
+  remaining(options);
   const sourcePath = resolve(registrationPath);
-  const sourceStat = lstatSync(sourcePath);
-  if (sourceStat.isSymbolicLink() || !sourceStat.isFile() || sourceStat.nlink !== 1 || realpathSync(sourcePath) !== sourcePath) throw new Error('registration source must be a canonical regular file without symlink or hard-link aliases');
-  const registration = parseRegistration(JSON.parse(readFileSync(sourcePath, 'utf8')) as unknown);
+  const sourceStat = await lstat(sourcePath);
+  if (sourceStat.isSymbolicLink() || !sourceStat.isFile() || sourceStat.nlink !== 1 || pathKey(await realpath(sourcePath)) !== pathKey(sourcePath)) throw new Error('registration source must be a canonical regular file without symlink or hard-link aliases');
+  const registration = parseRegistration(JSON.parse(await readFile(sourcePath, 'utf8') as string) as unknown);
   if (!registration.enabled) throw new Error('registration is disabled');
   if (!VERSION.test(identity.version) || !HASH.test(identity.digest)) throw new Error('invalid runtime identity');
   const capability = registration.capabilities.find((item) => item.version === identity.version && item.digest === identity.digest);
   if (!capability) throw new Error('runtime identity has no matching capability');
   let root: string;
-  try { root = realpathSync(resolve(cwd)); } catch { throw new Error('cwd must be an existing canonical worktree root'); }
-  if (root !== resolve(cwd)) throw new Error('cwd must be a canonical worktree root');
+  try { root = await realpath(resolve(cwd)); } catch { throw new Error('cwd must be an existing canonical worktree root'); }
+  if (pathKey(root) !== pathKey(resolve(cwd))) throw new Error('cwd must be a canonical worktree root');
+  root = resolve(cwd);
   const worktree = registration.worktrees.find((item) => pathKey(item.root) === pathKey(root));
   if (!worktree || worktree.state !== 'active') throw new Error('cwd is not an active registered worktree');
   if (worktree.version !== identity.version || worktree.digest !== identity.digest) throw new Error('runtime identity is not admitted for this worktree');
-  const canonicalGit = checkedExecutable(registration.gitExecutable, 'Git executable');
+  const canonicalGit = await checkedExecutable(registration.gitExecutable, 'Git executable');
   for (const worktree of registration.worktrees) {
     outsideWorktrees(sourcePath, [worktree], 'registration source');
     outsideWorktrees(canonicalGit, [worktree], 'Git executable');
     for (const item of registration.capabilities) for (const reviewer of item.reviewers) {
-      const canonicalReviewer = checkedExecutable(reviewer.executable, 'reviewer executable');
-      outsideWorktrees(canonicalReviewer, [worktree], 'reviewer executable');
+      outsideWorktrees(reviewer.executable, [worktree], 'reviewer executable');
     }
   }
+  for (const reviewer of capability.reviewers) await checkedExecutable(reviewer.executable, 'reviewer executable');
   const main = registration.mainRoot;
-  const mainRoot = gitPath(main, canonicalGit, '--show-toplevel');
-  const mainGitDir = gitPath(main, canonicalGit, '--absolute-git-dir');
-  const mainCommon = gitPath(main, canonicalGit, '--git-common-dir');
+  const mainRoot = await gitPath(main, canonicalGit, '--show-toplevel', options);
+  const mainGitDir = await gitPath(main, canonicalGit, '--absolute-git-dir', options);
+  const mainCommon = await gitPath(main, canonicalGit, '--git-common-dir', options);
   if (pathKey(mainRoot) !== pathKey(main) || pathKey(mainGitDir) !== pathKey(mainCommon) || pathKey(mainCommon) !== pathKey(registration.gitCommonDir)) throw new Error('registered main checkout identity mismatch');
   const mainDotGit = join(main, '.git');
-  const mainDotGitStat = lstatSync(mainDotGit);
+  const mainDotGitStat = await lstat(mainDotGit);
   let primaryWorktreeEntry: string;
   if (mainDotGitStat.isDirectory() && !mainDotGitStat.isSymbolicLink()) {
-    if (pathKey(realpathSync(mainDotGit)) !== pathKey(mainCommon)) throw new Error('main .git directory differs from registered common-dir');
+    if (pathKey(await realpath(mainDotGit)) !== pathKey(mainCommon)) throw new Error('main .git directory differs from registered common-dir');
     primaryWorktreeEntry = main;
-  } else if (mainDotGitStat.isFile() && mainDotGitStat.nlink === 1 && pathKey(realpathSync(mainDotGit)) === pathKey(mainDotGit)) {
+  } else if (mainDotGitStat.isFile() && mainDotGitStat.nlink === 1 && pathKey(await realpath(mainDotGit)) === pathKey(mainDotGit)) {
     primaryWorktreeEntry = mainCommon;
   } else {
     throw new Error('main .git must be a canonical directory or regular separate-git-dir file');
   }
-  const metadataRoot = gitPath(root, canonicalGit, '--show-toplevel');
-  const gitDir = gitPath(root, canonicalGit, '--absolute-git-dir');
-  const common = gitPath(root, canonicalGit, '--git-common-dir');
+  const metadataRoot = await gitPath(root, canonicalGit, '--show-toplevel', options);
+  const gitDir = await gitPath(root, canonicalGit, '--absolute-git-dir', options);
+  const common = await gitPath(root, canonicalGit, '--git-common-dir', options);
   if (pathKey(metadataRoot) !== pathKey(root) || pathKey(common) !== pathKey(mainCommon)
     || (pathKey(root) === pathKey(main) ? pathKey(gitDir) !== pathKey(common) : pathKey(gitDir) === pathKey(common))) throw new Error('Git identity or active worktree registration mismatch');
-  const listed = git(root, canonicalGit, ['worktree', 'list', '--porcelain']).split(/\r?\n/).filter((line) => line.startsWith('worktree ')).map((line) => realpathSync(line.slice('worktree '.length)));
+  const listed = (await git(root, canonicalGit, ['worktree', 'list', '--porcelain', '-z'], options)).split('\0').filter((field) => field.startsWith('worktree ')).map((field) => resolve(field.slice('worktree '.length)));
   if (pathKey(listed[0] ?? '') !== pathKey(primaryWorktreeEntry)
     || (pathKey(root) !== pathKey(main) && !listed.some((path) => pathKey(path) === pathKey(root)))) throw new Error('Git worktree membership differs from registration');
+  remaining(options);
   return { registration, capability, root, gitExecutable: canonicalGit };
 }
