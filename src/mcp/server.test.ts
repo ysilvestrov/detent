@@ -6,8 +6,8 @@ import { join, resolve } from 'node:path';
 import { serveMcp } from './server.js';
 import { ClaudeReportValidationError, IndeterminateProviderOutcomeError } from './claude.js';
 
-const neutral = (): string => realpathSync(mkdtempSync(join(tmpdir(), 'detent-mcp-test-neutral-')));
-const repo = (): string => realpathSync(mkdtempSync(join(tmpdir(), 'detent-mcp-test-repo-')));
+const neutral = (): string => realpathSync.native(mkdtempSync(join(tmpdir(), 'detent-mcp-test-neutral-')));
+const repo = (): string => realpathSync.native(mkdtempSync(join(tmpdir(), 'detent-mcp-test-repo-')));
 async function waitForMessages(getText: () => string, count: number): Promise<void> {
   const deadline = Date.now() + 2000;
   while (getText().trim().split('\n').filter(Boolean).length < count) {
@@ -16,7 +16,7 @@ async function waitForMessages(getText: () => string, count: number): Promise<vo
   }
 }
 const admitted = (root: string, roots = [root]) => ({
-  registration: { projectId: 'p', revision: 3, gitCommonDir: realpathSync(mkdtempSync(join(tmpdir(), 'detent-mcp-test-git-'))), worktrees: roots.map((worktreeRoot) => ({ root: worktreeRoot })) },
+  registration: { projectId: 'p', revision: 3, gitCommonDir: realpathSync.native(mkdtempSync(join(tmpdir(), 'detent-mcp-test-git-'))), worktrees: roots.map((worktreeRoot) => ({ root: worktreeRoot })) },
   capability: { reviewers: [{ id: 'claude', executable: '/claude', model: 'claude-haiku-5-5' }] },
   root,
   gitExecutable: '/git',
