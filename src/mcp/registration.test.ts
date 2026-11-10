@@ -1,13 +1,13 @@
 import { describe, expect, test, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, copyFileSync, ftruncateSync, linkSync, mkdirSync, mkdtempSync, openSync, symlinkSync, writeFileSync, writeSync, closeSync, renameSync } from 'node:fs';
+import { chmodSync, copyFileSync, ftruncateSync, linkSync, mkdirSync, mkdtempSync, openSync, realpathSync, symlinkSync, writeFileSync, writeSync, closeSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { gitEnvironment, parseRegistration, readAdmission, type ProjectRegistration } from './registration.js';
 
 const DIGEST = 'a'.repeat(64);
 const identity = { version: '1.2.3', digest: DIGEST };
-const gitExecutable = resolve(join(execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(), process.platform === 'win32' ? 'git.exe' : 'git'));
+const gitExecutable = realpathSync(resolve(join(execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(), process.platform === 'win32' ? 'git.exe' : 'git')));
 const gitEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: 'NUL', GIT_AUTHOR_NAME: 'test', GIT_AUTHOR_EMAIL: 'test@example.com', GIT_COMMITTER_NAME: 'test', GIT_COMMITTER_EMAIL: 'test@example.com' };
 
 function git(cwd: string, ...args: string[]): string {
@@ -16,7 +16,7 @@ function git(cwd: string, ...args: string[]): string {
 const pathKey = (path: string): string => path.replaceAll('/', '\\').toLowerCase();
 
 function fixture() {
-  const base = mkdtempSync(join(tmpdir(), 'detent-mcp-registration-'));
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'detent-mcp-registration-')));
   const main = join(base, 'main');
   const linked = join(base, 'linked');
   mkdirSync(main);
@@ -25,7 +25,7 @@ function fixture() {
   git(main, 'add', '.');
   git(main, 'commit', '-q', '-m', 'fixture');
   git(main, 'worktree', 'add', '-q', '-b', 'feature', linked);
-  const common = resolve(main, git(main, 'rev-parse', '--git-common-dir'));
+  const common = realpathSync(resolve(main, git(main, 'rev-parse', '--git-common-dir')));
   const registrationPath = join(base, 'registration.json');
   const fixtureGit = gitExecutable;
   const reviewerExecutable = join(base, 'claude.exe');
@@ -120,7 +120,7 @@ describe('registration admission', () => {
   });
 
   test('supports a main checkout with a separate Git directory', async () => {
-    const base = mkdtempSync(join(tmpdir(), 'detent-mcp-separate-git-'));
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'detent-mcp-separate-git-')));
     const main = join(base, 'main');
     const commonDir = join(base, 'metadata');
     mkdirSync(main);
@@ -128,7 +128,7 @@ describe('registration admission', () => {
     writeFileSync(join(main, 'file.txt'), 'fixture\n');
     git(main, 'add', '.');
     git(main, 'commit', '-q', '-m', 'fixture');
-    const actualCommon = resolve(main, git(main, 'rev-parse', '--git-common-dir'));
+    const actualCommon = realpathSync(resolve(main, git(main, 'rev-parse', '--git-common-dir')));
     const separateEntries = git(main, 'worktree', 'list', '--porcelain').split(/\r?\n/).filter((line) => line.startsWith('worktree '));
     expect(pathKey(separateEntries[0] as string)).toBe(pathKey(`worktree ${actualCommon}`));
     const reviewer = join(base, 'claude.exe');
