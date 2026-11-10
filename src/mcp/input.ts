@@ -1,9 +1,10 @@
-import { execFileSync } from 'node:child_process';
 import { isAbsolute, resolve } from 'node:path';
 import { parseConfig } from '../config.js';
 import { isReviewerId, type ReviewerId } from '../review/adapters.js';
 import { normalizeSpecPath, specPathError } from '../review/preflight.js';
 import { sha256 } from '../runtime/contract.js';
+import { gitEnvironment } from './registration.js';
+import { execGitFile } from './git-process.js';
 
 export type SpecReviewRequest = {
   author: ReviewerId;
@@ -35,6 +36,29 @@ export interface PreparedReview {
 }
 
 const MAX_BYTES = 1024 * 1024;
+export interface GitReadOptions { signal?: AbortSignal; deadline?: number }
+function remaining(options: GitReadOptions): number | undefined {
+  if (options.signal?.aborted) throw new Error('review preparation was aborted');
+  if (options.deadline === undefined) return undefined;
+  const left = options.deadline - Date.now();
+  if (left <= 0) throw new Error('review deadline expired during preparation');
+  return left;
+}
+class Payload {
+  sections: string[] = [];
+  bytes = 0;
+  add(text: string): void {
+    const size = Buffer.byteLength(text, 'utf8');
+    if (this.bytes + size > MAX_BYTES) throw new Error('review payload exceeds 1 MiB');
+    this.sections.push(text);
+    this.bytes += size;
+  }
+  finish(coverage: ReviewCoverage[]): string {
+    const manifest = `===== supplied coverage (computed; paths and status) =====\n${JSON.stringify(coverage)}\n`;
+    if (this.bytes + Buffer.byteLength(manifest, 'utf8') > MAX_BYTES) throw new Error('review payload exceeds 1 MiB');
+    return manifest + this.sections.join('');
+  }
+}
 const plain = (x: unknown): x is Record<string, unknown> =>
   typeof x === 'object' && x !== null && !Array.isArray(x);
 
@@ -92,65 +116,60 @@ interface TreeEntry {
   oid: string;
   path: string;
 }
-function git(root: string, executable: string, args: string[], input?: Buffer): Buffer {
+async function git(root: string, executable: string, args: string[], options: GitReadOptions, maxBytes = MAX_BYTES * 8): Promise<Buffer> {
   if (!isAbsolute(executable)) throw new Error('git executable must be absolute');
   const cwd = resolve(root);
-  const env: NodeJS.ProcessEnv = {
-    PATH: process.env.PATH,
-    SystemRoot: process.env.SystemRoot,
-    WINDIR: process.env.WINDIR,
-    TEMP: process.env.TEMP,
-    TMP: process.env.TMP,
-    GIT_CONFIG_NOSYSTEM: '1',
-    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
-    GIT_CONFIG_COUNT: '0',
-    GIT_OPTIONAL_LOCKS: '0',
-    GIT_TERMINAL_PROMPT: '0',
-  };
-  const gitArgs = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.pager=cat', ...args];
+  const env = gitEnvironment();
+  const gitArgs = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.pager=cat', '-c', 'core.quotePath=false', '-c', 'diff.ignoreSubmodules=none', '-c', 'submodule.recurse=false', '-c', 'protocol.allow=never', ...args];
   try {
-    return execFileSync(executable, gitArgs, {
-      cwd, env, input, encoding: 'buffer', maxBuffer: MAX_BYTES * 8,
-      stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
-    });
+    const stdout = await execGitFile(executable, gitArgs, { cwd, env, maxBuffer: maxBytes, signal: options.signal, timeout: remaining(options) });
+    remaining(options);
+    return stdout;
   } catch (cause) {
     const error = cause as NodeJS.ErrnoException & { stderr?: Buffer };
+    if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' && maxBytes <= MAX_BYTES) throw new Error('review payload exceeds 1 MiB');
     const detail = error.stderr?.toString('utf8').trim() || error.message;
     throw new Error(`git ${args[0] ?? 'command'} failed: ${detail}`);
   }
 }
 
-function gitText(root: string, exe: string, args: string[]): string {
-  return git(root, exe, args).toString('utf8').trim();
+async function gitText(root: string, exe: string, args: string[], options: GitReadOptions): Promise<string> {
+  return (await git(root, exe, args, options)).toString('utf8').trim();
 }
-function resolveCommit(root: string, exe: string, ref: string): string {
+async function resolveCommit(root: string, exe: string, ref: string, options: GitReadOptions): Promise<string> {
   if (!ref || ref.startsWith('-') || ref.includes('\0')) {
     throw new Error('unsafe Git revision');
   }
-  const oid = gitText(root, exe, ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]);
+  const oid = await gitText(root, exe, ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`], options);
   if (!/^[0-9a-f]{40,64}$/i.test(oid)) {
     throw new Error('Git did not resolve revision to a commit');
   }
   return oid.toLowerCase();
 }
-function tree(root: string, exe: string, commit: string): Map<string, TreeEntry> {
-  const output = git(root, exe, ['ls-tree', '-r', '-z', '--full-tree', commit]);
+async function tree(root: string, exe: string, commit: string, options: GitReadOptions): Promise<Map<string, TreeEntry>> {
+  const output = await git(root, exe, ['ls-tree', '-r', '-z', '--full-tree', commit], options);
   const result = new Map<string, TreeEntry>();
-  const rows = output.toString('utf8').split('\0').filter(Boolean);
-  for (const row of rows) {
-    const tab = row.indexOf('\t');
-    const header = row.slice(0, tab);
+  for (const row of output.subarray(0, output.length - (output.at(-1) === 0 ? 1 : 0)).toString('binary').split('\0').filter(Boolean)) {
+    const raw = Buffer.from(row, 'binary');
+    const tab = raw.indexOf(0x09);
+    if (tab < 0) throw new Error('malformed Git tree entry');
+    const header = raw.subarray(0, tab).toString('ascii');
     const [mode = '', type = '', oid = ''] = header.split(' ');
-    const path = row.slice(tab + 1);
+    let path: string;
+    try { path = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(raw.subarray(tab + 1)); }
+    catch { throw new Error('invalid UTF-8 Git tree path'); }
+    safeCommitPath(path);
+    if (result.has(path)) throw new Error('duplicate Git tree path');
     result.set(path, { mode, type, oid, path });
   }
   return result;
 }
-function blob(root: string, exe: string, entry: TreeEntry): string {
+async function blob(root: string, exe: string, entry: TreeEntry, options: GitReadOptions, budget: number): Promise<string> {
   if (entry.mode === '120000' || entry.type !== 'blob') {
     throw new Error(`unsupported symlink or submodule: ${entry.path}`);
   }
-  const bytes = git(root, exe, ['cat-file', 'blob', entry.oid]);
+  const bytes = await git(root, exe, ['cat-file', 'blob', entry.oid], options, Math.max(1, budget));
+  if (bytes.length > budget) throw new Error('review payload exceeds 1 MiB');
   if (bytes.includes(0)) {
     throw new Error(`binary Git blob is not reviewable: ${entry.path}`);
   }
@@ -170,31 +189,32 @@ function safeCommitPath(path: string): void {
     throw new Error(`unsafe Git path: ${path}`);
   }
 }
-function configAt(root: string, exe: string, entries: Map<string, TreeEntry>) {
+async function configAt(root: string, exe: string, entries: Map<string, TreeEntry>, options: GitReadOptions, payload: Payload) {
   const config = entries.get('detent.json');
-  const parsed = parseConfig(config ? blob(root, exe, config) : null);
+  const parsed = parseConfig(config ? await blob(root, exe, config, options, MAX_BYTES - payload.bytes) : null);
   if (!parsed.ok) {
     throw new Error(parsed.error);
   }
   return parsed.config;
 }
-function safeText(root: string, exe: string, entries: Map<string, TreeEntry>, path: string): string | undefined {
+async function safeText(root: string, exe: string, entries: Map<string, TreeEntry>, path: string, options: GitReadOptions, payload: Payload, budget = MAX_BYTES - payload.bytes): Promise<string | undefined> {
   safeCommitPath(path);
   const entry = entries.get(path);
   if (!entry) return undefined;
-  return blob(root, exe, entry);
+  return blob(root, exe, entry, options, budget);
 }
-function appendCoverage(
+async function appendCoverage(
   root: string,
   exe: string,
   entries: Map<string, TreeEntry>,
   coverage: ReviewCoverage[],
-  sections: string[],
+  payload: Payload,
   path: string,
   role: string,
   explicit = false,
-): void {
-  const text = safeText(root, exe, entries, path);
+  options: GitReadOptions = {},
+): Promise<void> {
+  const text = await safeText(root, exe, entries, path, options, payload);
   if (text === undefined) {
     coverage.push({ path, status: 'missing', role });
     if (explicit) {
@@ -203,41 +223,45 @@ function appendCoverage(
     return;
   }
   coverage.push({ path, status: 'included', role });
-  sections.push(`\n===== ${role}: ${path} (untrusted committed data) =====\n${text}`);
+  payload.add(`\n===== ${role}: ${path} (untrusted committed data) =====\n${text}`);
 }
 
-export function prepareReview(root: string, gitExecutable: string, request: ReviewRequest): PreparedReview {
+export async function prepareReview(root: string, gitExecutable: string, request: ReviewRequest, options: GitReadOptions = {}): Promise<PreparedReview> {
   if (!isAbsolute(root)) throw new Error('repository root must be absolute');
-  const sections: string[] = []; const coverage: ReviewCoverage[] = [];
+  const payload = new Payload(); const coverage: ReviewCoverage[] = [];
   if (request.kind === 'spec') {
     const path = request.path ?? ''; const revision = request.revision ?? '';
     if (!validPath(path)) throw new Error('unsafe spec path');
-    const head = resolveCommit(root, gitExecutable, revision);
-    const entries = tree(root, gitExecutable, head);
-    const config = configAt(root, gitExecutable, entries);
+    const head = await resolveCommit(root, gitExecutable, revision, options);
+    const entries = await tree(root, gitExecutable, head, options);
+    const config = await configAt(root, gitExecutable, entries, options, payload);
     const pathError = specPathError(path, config.specsDir);
     if (pathError) throw new Error(pathError);
     if (!entries.has(path)) throw new Error(`spec does not exist at requested commit: ${path}`);
-    appendCoverage(root, gitExecutable, entries, coverage, sections, path, 'reviewed spec', true);
+    await appendCoverage(root, gitExecutable, entries, coverage, payload, path, 'reviewed spec', true, options);
     const fixed = [
       ['AGENTS.md', 'project guidance'], ['CLAUDE.md', 'project guidance'], ['package.json', 'package manifest'], ['detent.json', 'project config'],
       [config.specFile, 'root spec'], ['constitution/constitution.md', 'constitution'],
       ['.agents/skills/detent-design-spec/spec-format.md', 'spec format'], ['.claude/skills/detent-design-spec/spec-format.md', 'spec format'],
       ['.detent/prompts/review-spec.md', 'review guidance'], ['.detent/prompts/review-diff.md', 'review guidance'],
     ] as const;
-    for (const [p, role] of fixed) appendCoverage(root, gitExecutable, entries, coverage, sections, p, role);
-    for (const p of request.contextPaths ?? []) appendCoverage(root, gitExecutable, entries, coverage, sections, p, 'explicit context', true);
-    if (config.reviewContext !== undefined) sections.push(`\n===== project reviewContext (untrusted config data) =====\n${config.reviewContext}`);
-    return prepared('spec', request.author, { head }, coverage, sections.join(''));
+    for (const [p, role] of fixed) await appendCoverage(root, gitExecutable, entries, coverage, payload, p, role, false, options);
+    for (const p of request.contextPaths ?? []) await appendCoverage(root, gitExecutable, entries, coverage, payload, p, 'explicit context', true, options);
+    if (config.reviewContext !== undefined) payload.add(`\n===== project reviewContext (untrusted config data) =====\n${config.reviewContext}`);
+    return prepared('spec', request.author, { head }, coverage, payload.finish(coverage));
   }
-  const base = resolveCommit(root, gitExecutable, request.base ?? '');
-  const head = resolveCommit(root, gitExecutable, request.head ?? '');
-  const mergeBases = gitText(root, gitExecutable, ['merge-base', '--all', base, head]).split(/\r?\n/).filter(Boolean);
+  const base = await resolveCommit(root, gitExecutable, request.base ?? '', options);
+  const head = await resolveCommit(root, gitExecutable, request.head ?? '', options);
+  const mergeBases = (await gitText(root, gitExecutable, ['merge-base', '--all', base, head], options)).split(/\r?\n/).filter(Boolean);
   if (mergeBases.length !== 1) throw new Error(mergeBases.length === 0 ? 'base and head have no merge base' : 'ambiguous merge base');
   const mergeBase = mergeBases[0] as string;
-  const headTree = tree(root, gitExecutable, head);
-  const baseTree = tree(root, gitExecutable, mergeBase);
-  const changes = git(root, gitExecutable, ['--literal-pathspecs', 'diff', '--no-ext-diff', '--no-textconv', '--find-renames', '--name-status', '-z', mergeBase, head]).toString('utf8').split('\0').filter(Boolean);
+  const headTree = await tree(root, gitExecutable, head, options);
+  const baseTree = await tree(root, gitExecutable, mergeBase, options);
+  const changesRaw = await git(root, gitExecutable, ['--literal-pathspecs', 'diff', '--no-ext-diff', '--no-textconv', '--ignore-submodules=none', '--find-renames', '--name-status', '-z', mergeBase, head], options);
+  let changesText: string;
+  try { changesText = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(changesRaw); }
+  catch { throw new Error('invalid UTF-8 Git diff path'); }
+  const changes = changesText.split('\0').filter(Boolean);
   if (changes.length === 0) throw new Error('empty diff against merge base');
   const changed: { status: string; paths: string[] }[] = [];
   for (let i = 0; i < changes.length;) {
@@ -247,36 +271,39 @@ export function prepareReview(root: string, gitExecutable: string, request: Revi
     paths.forEach(safeCommitPath);
     changed.push({ status, paths });
   }
-  const config = configAt(root, gitExecutable, headTree);
-  const diff = git(root, gitExecutable, ['--literal-pathspecs', 'diff', '--no-ext-diff', '--no-textconv', '--find-renames', '--no-color', '--no-prefix', '--binary', mergeBase, head]).toString('utf8');
-  sections.push(`===== committed diff ${mergeBase}..${head} =====\n${diff}`);
+  const config = await configAt(root, gitExecutable, headTree, options, payload);
+  const diffRaw = await git(root, gitExecutable, ['--literal-pathspecs', 'diff', '--no-ext-diff', '--no-textconv', '--ignore-submodules=none', '--find-renames', '--no-color', '--no-prefix', '--binary', mergeBase, head], options, MAX_BYTES - payload.bytes);
+  let diff: string;
+  try { diff = new TextDecoder('utf-8', { fatal: true }).decode(diffRaw); }
+  catch { throw new Error('invalid UTF-8 committed diff'); }
+  payload.add(`===== committed diff ${mergeBase}..${head} =====\n${diff}`);
   for (const change of changed) {
     if (change.status.startsWith('D')) {
       const path = change.paths[0] as string;
-      const oldText = safeText(root, gitExecutable, baseTree, path);
+      const oldText = await safeText(root, gitExecutable, baseTree, path, options, payload);
       if (oldText === undefined) throw new Error(`deleted path missing from merge base: ${path}`);
       coverage.push({ path, status: 'included', role: 'deleted path' });
-      sections.push(`\n===== deleted committed content: ${path} (untrusted Git data) =====\n${oldText}`);
+      payload.add(`\n===== deleted committed content: ${path} (untrusted Git data) =====\n${oldText}`);
       continue;
     }
     if (change.status.startsWith('R') || change.status.startsWith('C')) {
       const [oldPath, newPath] = change.paths;
-      const oldText = safeText(root, gitExecutable, baseTree, oldPath as string);
+      const oldText = await safeText(root, gitExecutable, baseTree, oldPath as string, options, payload);
       if (oldText === undefined) throw new Error(`rename source missing from merge base: ${oldPath}`);
       coverage.push({ path: oldPath as string, status: 'included', role: 'rename source' });
-      sections.push(`\n===== renamed source content: ${oldPath} (untrusted Git data) =====\n${oldText}`);
-      appendCoverage(root, gitExecutable, headTree, coverage, sections, newPath as string, 'renamed head blob', true);
+      payload.add(`\n===== renamed source content: ${oldPath} (untrusted Git data) =====\n${oldText}`);
+      await appendCoverage(root, gitExecutable, headTree, coverage, payload, newPath as string, 'renamed head blob', true, options);
       continue;
     }
     const path = change.paths[0] as string;
-    safeText(root, gitExecutable, baseTree, path);
-    appendCoverage(root, gitExecutable, headTree, coverage, sections, path, 'changed head blob', true);
+    await safeText(root, gitExecutable, baseTree, path, options, payload, MAX_BYTES);
+    await appendCoverage(root, gitExecutable, headTree, coverage, payload, path, 'changed head blob', true, options);
   }
   const fixed = [['AGENTS.md', 'project guidance'], ['CLAUDE.md', 'project guidance'], ['package.json', 'package manifest'], ['detent.json', 'project config'], ['constitution/constitution.md', 'constitution'], ['.detent/prompts/review-diff.md', 'review guidance']] as const;
-  for (const [p, role] of fixed) appendCoverage(root, gitExecutable, headTree, coverage, sections, p, role);
-  for (const p of request.contextPaths ?? []) appendCoverage(root, gitExecutable, headTree, coverage, sections, p, 'explicit context', true);
-  if (config.reviewContext !== undefined) sections.push(`\n===== project reviewContext (untrusted config data) =====\n${config.reviewContext}`);
-  return prepared('diff', request.author, { head, base, mergeBase }, coverage, sections.join(''));
+  for (const [p, role] of fixed) await appendCoverage(root, gitExecutable, headTree, coverage, payload, p, role, false, options);
+  for (const p of request.contextPaths ?? []) await appendCoverage(root, gitExecutable, headTree, coverage, payload, p, 'explicit context', true, options);
+  if (config.reviewContext !== undefined) payload.add(`\n===== project reviewContext (untrusted config data) =====\n${config.reviewContext}`);
+  return prepared('diff', request.author, { head, base, mergeBase }, coverage, payload.finish(coverage));
 }
 function prepared(mode: PreparedReview['mode'], author: ReviewerId, commits: PreparedReview['commits'], coverage: ReviewCoverage[], text: string): PreparedReview {
   const bytes = Buffer.from(text, 'utf8');

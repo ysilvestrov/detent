@@ -16,7 +16,7 @@
 - Runtime/grant installation та native boundary proof поки не реалізуються. Ручна fixture registration у тесті не є user consent або ready setup.
 - Registration читається наново на кожний виклик. Disabled registration відхиляється до Git payload/reviewer. Reader не використовує fail-fast writer lock.
 - Git і reviewer запускаються абсолютними executable, shell=false. Проєктні instructions є untrusted data. Тести не виконують справжній платний review.
-- Payload 1 MiB UTF-8, output 1 MiB, review deadline 900 секунд. Cancel/disconnect завершує local reviewer tree, без automatic retry.
+- Payload 1 MiB UTF-8, output 1 MiB, спільний review deadline 900 секунд від початку tool call, включно з admission/preparation. Cancel/disconnect завершує розпочаті Git/reviewer processes, без automatic retry.
 - Spec path перевіряється чинним specsDir/YYYY-MM validator. PR використовує єдиний merge-base і повні head text blobs.
 - Існуючі CLI install/cross-review/pr-review і Claude/Antigravity paths мають пройти gate з чинними очікуваннями.
 - Temporary fixture dirs залишаються для відтворення. Recursive cleanup не додається.
@@ -45,7 +45,7 @@ ClaudeReviewResult має report, findings, model, tools:[], mcpServers:[], tool
 
 Файли src/mcp/registration.ts та registration.test.ts.
 
-Інтерфейси parseRegistration(value:unknown):ProjectRegistration і readAdmission(registrationPath:string,cwd:string,identity:RuntimeIdentity):Admission. Source path не може бути symlink/hardlink або лежати всередині зареєстрованих worktrees. Executable paths абсолютні й поза worktrees, pending/disabled/unknown version/digest не допускаються. Це structural checks, filesystem protection підтвердить installer.
+Інтерфейси parseRegistration(value:unknown):ProjectRegistration і readAdmission(registrationPath:string,cwd:string,identity:RuntimeIdentity,options?:AdmissionOptions):Promise<Admission>, де AdmissionOptions містить signal?:AbortSignal і deadline?:number (absolute milliseconds). Асинхронний API уточнено за наскрізним рев’ю для responsive cancellation. Source path не може бути symlink/hardlink або лежати всередині зареєстрованих worktrees. Executable paths абсолютні й поза worktrees, pending/disabled/unknown version/digest не допускаються. Це structural checks, filesystem protection підтвердить installer.
 
 - [ ] RED. Тести admission main/linked, B refusal, exact cwd root, malformed/extra keys, pending/disabled, version/digest mismatch, changed common-dir, relative executable і linked registration file. Fixture repos нові на кожний test run.
 - [ ] GREEN. Reuse safeComponent/contract conventions без дублювання великого runtime validator. Sanitized Git environment, shell=false, canonical identity та Git worktree list з незалежним main root.
@@ -56,7 +56,7 @@ ClaudeReviewResult має report, findings, model, tools:[], mcpServers:[], tool
 
 Файли src/mcp/input.ts та input.test.ts. Незалежне від admission I/O, викликається тільки після admission.
 
-Інтерфейси parseReviewRequest(value:unknown):ReviewRequest та prepareReview(root:string,gitExecutable:string,request:ReviewRequest):PreparedReview. Config parser і specPathError існуючі. Safe Git reader не виконує checkout/status/hooks/filters, відкидає inherited GIT_* overrides.
+Інтерфейси parseReviewRequest(value:unknown):ReviewRequest та prepareReview(root:string,gitExecutable:string,request:ReviewRequest,options?:GitReadOptions):Promise<PreparedReview>. GitReadOptions містить signal?:AbortSignal і deadline?:number, спільні з admission. Config parser і specPathError існуючі. Safe Git reader не виконує checkout/status/hooks/filters, відкидає inherited GIT_* overrides, replacement objects і implicit fetch. Coverage входить до exact hashed stdin, бюджет перевіряється під час накопичення.
 
 - [ ] RED. Специфікація на old commit, committed context, missing optional references у coverage, missing explicit context path як помилка, unknown fields, unsafe paths/revs, symlink/submodule/binary/LFS/invalid UTF-8, payload >1 MiB.
 - [ ] RED. Code із divergent base має exact merge-base/head blobs, rename/delete позначені, empty diff і ambiguous merge-base відхилені. Uncommitted canary не потрапляє до stdin.
@@ -67,7 +67,7 @@ ClaudeReviewResult має report, findings, model, tools:[], mcpServers:[], tool
 
 Файли src/mcp/claude.ts та claude.test.ts. Використовує Reviewer shape з registration та protocol.classifyResult.
 
-Інтерфейс runClaudeReview(options:{reviewer, text:string, cwd:string, signal?:AbortSignal, timeoutMs?:number, maxOutputBytes?:number}):Promise<ClaudeReviewResult>. Тести можуть ін'єктувати spawn/process-tree cleanup через internal I/O option, недоступний через MCP parameters.
+Інтерфейс runClaudeReview(options:{reviewer, text:string, cwd:string, mode?:'spec'|'diff', coverage?:ReviewCoverage[], signal?:AbortSignal, timeoutMs?:number, maxOutputBytes?:number}):Promise<ClaudeReviewResult>. Сервер передає mode/coverage і лише залишок спільного deadline. Тести можуть ін'єктувати spawn/process-tree cleanup через internal I/O option, недоступний через MCP parameters. Звіт містить per-check verified/not-verified з evidence paths; validation доводить формат і наявність переданих джерел, а не семантичну істинність модельних висновків.
 
 - [ ] RED. Fake CLI записує stdin/args і повертає init + report/result JSONL. Assertions фіксують absolute command, empty tools/MCP, safe/restricted/settings/system-prompt, nonzero/empty/malformed, wrong family, enabled tools/tool_use, invalid terminal marker.
 - [ ] RED. Timeout, already-aborted signal, active cancellation, output overflow і disconnect cleanup не залишають running child й не повертають completed. Визначити cleanup direct child/tree для підтриманих платформ, unsupported host не отримує хибного proof.

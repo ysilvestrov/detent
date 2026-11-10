@@ -1,7 +1,7 @@
 // `npm run smoke`: packs this repository, installs the archive into a temp folder and checks the
 // installed `detent` as a user would run it (spec 2026-11-02-ci-gate-design.md). The folder stays:
 // recursive deletion is not used in this repository, the owner removes `detent-smoke-*` by hand.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -133,7 +133,22 @@ const mcpInput = [
   { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'cross_review', arguments: { author: 'codex', kind: 'spec', path: 'docs/specs/2026-11/design.md', revision: 'HEAD', unexpected: true } } },
   { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'cross_review', arguments: { author: 'claude', kind: 'spec', path: 'docs/specs/2026-11/design.md', revision: 'HEAD' } } },
 ].map((message) => JSON.stringify(message)).join('\n') + '\n';
-const mcpResult = detent(['mcp', '--registration', mcpRegistration], { code: 0, cwd: mcpRepo, input: mcpInput, stdout: (out) => {
+const mcpResult = await new Promise((resolve) => {
+  const child = spawn(process.execPath, [join(installed, 'dist', 'cli.js'), 'mcp', '--registration', mcpRegistration], {
+    cwd: mcpRepo, env: detentEnv, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const result = { status: null, stdout: '', stderr: '' };
+  const timer = setTimeout(() => { child.kill(); fail('MCP smoke timed out', result); }, 15_000);
+  child.stdout.on('data', (chunk) => {
+    result.stdout += chunk.toString();
+    if ((result.stdout.match(/\n/g) ?? []).length >= 5 && !child.stdin.writableEnded) child.stdin.end();
+  });
+  child.stderr.on('data', (chunk) => { result.stderr += chunk.toString(); });
+  child.on('error', (error) => fail(`MCP smoke failed to start: ${error.message}`, result));
+  child.on('close', (code) => { clearTimeout(timer); result.status = code; resolve(result); });
+  child.stdin.write(mcpInput);
+});
+if (mcpResult.status !== 0 || (mcpResult.stdout.match(/\n/g) ?? []).length !== 5 || !((out) => {
   const messages = out.trim().split('\n').map((line) => JSON.parse(line));
   return messages[0].result.protocolVersion === '2024-11-05'
     && messages[1].result.tools[0].name === 'cross_review'
@@ -142,7 +157,8 @@ const mcpResult = detent(['mcp', '--registration', mcpRegistration], { code: 0, 
     && messages[3].result.structuredContent.status === 'failed'
     && messages[4].result.isError === true
     && messages[4].result.structuredContent.status === 'failed';
-}, stderr: (err) => err === '' });
+})(mcpResult.stdout) || mcpResult.stderr !== '') fail('MCP smoke returned unexpected responses', mcpResult);
+console.log('smoke: ok: detent mcp --registration');
 if (mcpResult.stdout.includes('CROSS-REVIEW-RESULT')) fail('MCP smoke unexpectedly ran a paid review', mcpResult);
 const unregisteredRepo = join(base, 'unregistered-repo');
 mkdirSync(unregisteredRepo);

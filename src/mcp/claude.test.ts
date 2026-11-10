@@ -5,7 +5,8 @@ import type { SpawnOptions } from 'node:child_process';
 import { runClaudeReview } from './claude.js';
 
 const init = { type: 'system', subtype: 'init', model: 'claude-haiku-5-5', tools: [], mcp_servers: [] };
-const success = (report = 'Review complete.\nCROSS-REVIEW-RESULT: 0 findings') => ({
+const validReport = 'CHECK: requirements | not-verified | evidence: []\nCHECK: constitution | not-verified | evidence: []\nCHECK: format | not-verified | evidence: []\nCHECK: implementation | not-verified | evidence: []\nCHECK: reuse | not-verified | evidence: []\nCROSS-REVIEW-RESULT: 0 findings';
+const success = (report = validReport) => ({
   type: 'result', subtype: 'success', result: report,
 });
 const stream = (...events: unknown[]) => `${events.map((event) => JSON.stringify(event)).join('\n')}\n`;
@@ -46,12 +47,76 @@ const run = (request: Parameters<typeof runClaudeReview>[0], io: Parameters<type
   runClaudeReview(request, { platform: 'win32', ...io });
 
 describe('runClaudeReview', () => {
+  it('rejects a count-only report and unsupported path evidence', async () => {
+    const markerOnly = fakeProcess(stream(init, success('CROSS-REVIEW-RESULT: 0 findings')));
+    await expect(run({ ...options, coverage: [{ path: 'src/a.ts', status: 'included', role: 'changed head blob' }] }, { spawn: markerOnly.spawn })).rejects.toThrow(/check|evidence|report/i);
+    const unsupported = fakeProcess(stream(init, success('CHECK: implementation | verified | evidence: missing.ts\nCROSS-REVIEW-RESULT: 0 findings')));
+    await expect(run({ ...options, coverage: [{ path: 'src/a.ts', status: 'included', role: 'changed head blob' }] }, { spawn: unsupported.spawn })).rejects.toThrow(/evidence|coverage/i);
+  });
+
+  it('accepts explicit checks grounded in supplied included and missing paths', async () => {
+    const coverage = [
+      { path: 'docs/specs/2026-11/a.md', status: 'included' as const, role: 'reviewed spec' },
+      { path: 'constitution/constitution.md', status: 'missing' as const, role: 'constitution' },
+      { path: 'format.md', status: 'included' as const, role: 'spec format' },
+    ];
+    const report = 'CHECK: requirements | verified | evidence: ["docs/specs/2026-11/a.md"]\nCHECK: constitution | not-verified | evidence: ["constitution/constitution.md"]\nCHECK: format | verified | evidence: ["format.md"]\nCHECK: implementation | not-verified | evidence: ["docs/specs/2026-11/a.md"]\nCHECK: reuse | not-verified | evidence: ["docs/specs/2026-11/a.md"]\nCROSS-REVIEW-RESULT: 0 findings';
+    const { spawn } = fakeProcess(stream(init, success(report)));
+    await expect(run({ ...options, coverage }, { spawn })).resolves.toMatchObject({ report, findings: 0 });
+  });
+
+  it('requires explicit not-verified implementation and reuse checks for a spec without code context', async () => {
+    const coverage = [
+      { path: 'docs/specs/2026-11/a.md', status: 'included' as const, role: 'reviewed spec' },
+      { path: 'constitution/constitution.md', status: 'missing' as const, role: 'constitution' },
+      { path: 'format.md', status: 'missing' as const, role: 'spec format' },
+    ];
+    const report = 'CHECK: requirements | verified | evidence: ["docs/specs/2026-11/a.md"]\nCHECK: constitution | not-verified | evidence: ["constitution/constitution.md"]\nCHECK: format | not-verified | evidence: ["format.md"]\nCHECK: implementation | not-verified | evidence: ["docs/specs/2026-11/a.md"]\nCHECK: reuse | not-verified | evidence: ["docs/specs/2026-11/a.md"]\nCROSS-REVIEW-RESULT: 0 findings';
+    const { spawn } = fakeProcess(stream(init, success(report)));
+    await expect(run({ ...options, coverage, mode: 'spec' }, { spawn })).resolves.toMatchObject({ report, findings: 0 });
+    const wrong = fakeProcess(stream(init, success(report.replace('implementation | not-verified', 'implementation | verified'))));
+    await expect(run({ ...options, coverage, mode: 'spec' }, { spawn: wrong.spawn })).rejects.toThrow(/implementation evidence/i);
+    const withContext = [...coverage, { path: 'src/implementation.ts', status: 'included' as const, role: 'explicit context' }];
+    const grounded = report.replace('implementation | not-verified | evidence: ["docs/specs/2026-11/a.md"]', 'implementation | verified | evidence: ["src/implementation.ts"]')
+      .replace('reuse | not-verified | evidence: ["docs/specs/2026-11/a.md"]', 'reuse | verified | evidence: ["src/implementation.ts"]');
+    const positive = fakeProcess(stream(init, success(grounded)));
+    await expect(run({ ...options, coverage: withContext, mode: 'spec' }, { spawn: positive.spawn })).resolves.toMatchObject({ report: grounded });
+  });
+
+  it('requires constitution, implementation, tests and reuse checks for code review', async () => {
+    const coverage = [{ path: 'src/main.ts', status: 'included' as const, role: 'changed head blob' }];
+    const report = 'CHECK: constitution | not-verified | evidence: ["src/main.ts"]\nCHECK: implementation | verified | evidence: ["src/main.ts"]\nCHECK: tests | not-verified | evidence: ["src/main.ts"]\nCHECK: reuse | not-verified | evidence: ["src/main.ts"]\nCROSS-REVIEW-RESULT: 0 findings';
+    const { spawn } = fakeProcess(stream(init, success(report)));
+    await expect(run({ ...options, mode: 'diff', coverage }, { spawn })).resolves.toMatchObject({ report });
+  });
+
+  it('accepts every included role for a cited path that appears more than once in coverage', async () => {
+    const coverage = [
+      { path: 'constitution/constitution.md', status: 'included' as const, role: 'changed head blob' },
+      { path: 'constitution/constitution.md', status: 'included' as const, role: 'constitution' },
+      { path: 'src/shared.ts', status: 'included' as const, role: 'changed head blob' },
+      { path: 'src/shared.ts', status: 'included' as const, role: 'explicit context' },
+    ];
+    const report = 'CHECK: constitution | verified | evidence: ["constitution/constitution.md"]\nCHECK: implementation | verified | evidence: ["src/shared.ts"]\nCHECK: tests | not-verified | evidence: ["src/shared.ts"]\nCHECK: reuse | verified | evidence: ["src/shared.ts"]\nCROSS-REVIEW-RESULT: 0 findings';
+    const positive = fakeProcess(stream(init, success(report)));
+    await expect(run({ ...options, mode: 'diff', coverage }, { spawn: positive.spawn })).resolves.toMatchObject({ report });
+    const unknown = fakeProcess(stream(init, success(report.replace('"src/shared.ts"', '"outside.ts"'))));
+    await expect(run({ ...options, mode: 'diff', coverage }, { spawn: unknown.spawn })).rejects.toThrow(/outside supplied coverage/i);
+    const missingOnly = coverage.map((item) => item.path === 'constitution/constitution.md' ? { ...item, status: 'missing' as const } : item);
+    const unsupported = fakeProcess(stream(init, success(report)));
+    await expect(run({ ...options, mode: 'diff', coverage: missingOnly }, { spawn: unsupported.spawn })).rejects.toThrow(/included evidence/i);
+  });
+
+  it('rejects an assistant model conflicting with the pinned init model', async () => {
+    const { spawn } = fakeProcess(stream(init, { type: 'assistant', message: { model: 'claude-opus-4-1', content: [{ type: 'text', text: 'report' }] } }, success()));
+    await expect(run(options, { spawn })).rejects.toThrow(/model/i);
+  });
   it('runs a no-tools review and returns facts observed in the stream', async () => {
     const { spawn, getInput } = fakeProcess(stream(init, success()));
     const result = await run(options, { spawn });
 
     expect(result).toEqual({
-      report: 'Review complete.\nCROSS-REVIEW-RESULT: 0 findings',
+      report: validReport,
       findings: 0, model: 'claude-haiku-5-5', tools: [], mcpServers: [], toolUseCount: 0,
     });
     expect(spawn).toHaveBeenCalledOnce();

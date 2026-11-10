@@ -95,7 +95,7 @@ Project config у main checkout та кожному linked worktree вказує
 ```toml
 [mcp_servers.detent]
 command = "<absolute protected node>"
-args = ["<installed entrypoint>", "--registration", "<protected project binding>"]
+args = ["<installed entrypoint>", "mcp", "--registration", "<protected project binding>"]
 env = { NODE_OPTIONS = "", NODE_PATH = "" }
 enabled_tools = ["cross_review"]
 
