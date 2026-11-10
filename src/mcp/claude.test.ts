@@ -49,9 +49,22 @@ const run = (request: Parameters<typeof runClaudeReview>[0], io: Parameters<type
 describe('runClaudeReview', () => {
   it('rejects a count-only report and unsupported path evidence', async () => {
     const markerOnly = fakeProcess(stream(init, success('CROSS-REVIEW-RESULT: 0 findings')));
-    await expect(run({ ...options, coverage: [{ path: 'src/a.ts', status: 'included', role: 'changed head blob' }] }, { spawn: markerOnly.spawn })).rejects.toThrow(/check|evidence|report/i);
-    const unsupported = fakeProcess(stream(init, success('CHECK: implementation | verified | evidence: missing.ts\nCROSS-REVIEW-RESULT: 0 findings')));
-    await expect(run({ ...options, coverage: [{ path: 'src/a.ts', status: 'included', role: 'changed head blob' }] }, { spawn: unsupported.spawn })).rejects.toThrow(/evidence|coverage/i);
+    await expect(run({ ...options, coverage: [{ path: 'src/a.ts', status: 'included', role: 'changed head blob' }] }, { spawn: markerOnly.spawn })).rejects.toThrow('Claude report is missing required per-check evidence.');
+    const grounded = validReport.replaceAll('[]', '["src/a.ts"]');
+    const outside = grounded.replace('requirements | not-verified | evidence: ["src/a.ts"]', 'requirements | not-verified | evidence: ["outside.ts"]');
+    const unsupported = fakeProcess(stream(init, success(outside)));
+    await expect(run({ ...options, coverage: [{ path: 'src/a.ts', status: 'included', role: 'changed head blob' }] }, { spawn: unsupported.spawn })).rejects.toThrow('Claude report cites evidence outside supplied coverage: requirements.');
+  });
+
+  it('accepts a verified constitution citation from a marked AGENTS guidance block', async () => {
+    const coverage = [
+      { path: 'docs/specs/2026-11/a.md', status: 'included' as const, role: 'reviewed spec' },
+      { path: 'AGENTS.md', status: 'included' as const, role: 'project guidance' },
+      { path: 'AGENTS.md', status: 'included' as const, role: 'constitution' },
+    ];
+    const report = 'CHECK: requirements | verified | evidence: ["docs/specs/2026-11/a.md"]\nCHECK: constitution | verified | evidence: ["AGENTS.md"]\nCHECK: format | not-verified | evidence: ["docs/specs/2026-11/a.md"]\nCHECK: implementation | not-verified | evidence: ["docs/specs/2026-11/a.md"]\nCHECK: reuse | not-verified | evidence: ["docs/specs/2026-11/a.md"]\nCROSS-REVIEW-RESULT: 0 findings';
+    const { spawn } = fakeProcess(stream(init, success(report)));
+    await expect(run({ ...options, coverage, mode: 'spec' }, { spawn })).resolves.toMatchObject({ report });
   });
 
   it('accepts explicit checks grounded in supplied included and missing paths', async () => {
@@ -128,14 +141,16 @@ describe('runClaudeReview', () => {
     expect(args).toContain('--safe-mode');
     expect(args).toContain('--no-session-persistence');
     expect(args).toContain('--disable-slash-commands');
-    expect(args).toContain('--disallowedTools');
-    expect(args).toContain('*');
+    expect(args[args.indexOf('--disallowedTools') + 1]).toBe('*');
     expect(args).toContain('--strict-mcp-config');
     expect(args).toContain('--setting-sources');
     expect(args[args.indexOf('--tools') + 1]).toBe('');
     expect(args[args.indexOf('--setting-sources') + 1]).toBe('');
     expect(args[args.indexOf('--mcp-config') + 1]).toBe('{"mcpServers":{}}');
     expect(args[args.indexOf('--settings') + 1]).toBe('{"disableAllHooks":true}');
+    expect(args[args.indexOf('--output-format') + 1]).toBe('stream-json');
+    expect(args[args.indexOf('--system-prompt') + 1]).toContain('CROSS-REVIEW-RESULT');
+    expect(args.slice(-2)).toEqual(['--model', 'haiku']);
     expect(args.join(' ')).toContain('untrusted');
     expect(args.join(' ')).toContain('CROSS-REVIEW-RESULT');
   });
@@ -193,14 +208,28 @@ describe('runClaudeReview', () => {
     await expect(run(options, { spawn })).rejects.toThrow(/tool/i);
   });
 
+  it.each(['server_tool_use', 'mcp_tool_use', 'tool_result', 'server_tool_result', 'mcp_tool_result', 'tool_use_summary'])('rejects observed %s evidence despite empty init tools', async (type) => {
+    const { spawn } = fakeProcess(stream(init, { type: 'assistant', message: { content: [{ type }] } }, success()));
+    await expect(run(options, { spawn })).rejects.toThrow('Claude tools were enabled or used.');
+  });
+
+  it('rejects top-level tool-use summaries and observed nonzero tool-use counts', async () => {
+    const summary = fakeProcess(stream(init, { type: 'system', subtype: 'tool_use_summary' }, success()));
+    await expect(run(options, { spawn: summary.spawn })).rejects.toThrow('Claude tools were enabled or used.');
+    const count = fakeProcess(stream(init, { type: 'assistant', message: { usage: { tool_use_count: 1 } } }, success()));
+    await expect(run(options, { spawn: count.spawn })).rejects.toThrow('Claude tools were enabled or used.');
+  });
+
   it('rejects reports without a valid terminal marker', async () => {
     const { spawn } = fakeProcess(stream(init, success('Review complete.')));
     await expect(run(options, { spawn })).rejects.toThrow(/CROSS-REVIEW-RESULT/i);
   });
 
   it('rejects unsuccessful and empty streams', async () => {
-    const { spawn } = fakeProcess(stream(init, { type: 'result', subtype: 'error', result: 'no' }));
-    await expect(run(options, { spawn })).rejects.toThrow();
+    const unsuccessful = fakeProcess(stream(init, { type: 'result', subtype: 'error', result: 'no' }));
+    await expect(run(options, { spawn: unsuccessful.spawn })).rejects.toThrow('Claude returned an empty or unsuccessful report.');
+    const empty = fakeProcess('');
+    await expect(run(options, { spawn: empty.spawn })).rejects.toThrow('Claude stream must contain one init followed by a single terminal result.');
   });
 
   it('rejects an already aborted request without spawning', async () => {
@@ -209,6 +238,39 @@ describe('runClaudeReview', () => {
     const { spawn } = fakeProcess(stream(init, success()));
     await expect(run({ ...options, signal: controller.signal }, { spawn })).rejects.toThrow(/abort/i);
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('classifies only a spawned local interruption as an indeterminate provider outcome', async () => {
+    const child = makeChild(849);
+    const spawn = vi.fn<SpawnCall>(() => child);
+    const killTree = vi.fn(async () => { child.emit('close', null, 'SIGTERM'); });
+    const controller = new AbortController();
+    const pending = run({ ...options, signal: controller.signal }, { spawn, killTree });
+    child.emit('spawn');
+    controller.abort();
+    const interrupted = await pending.catch((error: unknown) => error);
+    expect(interrupted).toMatchObject({ providerOutcome: 'indeterminate', message: 'Claude review was aborted.' });
+    expect(killTree).toHaveBeenCalledOnce();
+
+    const prestart = fakeProcess(stream(init, success()));
+    const refusal = await run(options, { spawn: prestart.spawn, env: { ANTHROPIC_BASE_URL: 'https://proxy.invalid' } }).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(Error);
+    expect(refusal).not.toHaveProperty('providerOutcome');
+    expect(prestart.spawn).not.toHaveBeenCalled();
+
+    const failedChild = makeChild(850);
+    const failedStart = run(options, { spawn: vi.fn<SpawnCall>(() => failedChild) });
+    failedChild.emit('error', new Error('executable unavailable'));
+    const spawnFailure = await failedStart.catch((error: unknown) => error);
+    expect(spawnFailure).toBeInstanceOf(Error);
+    expect(spawnFailure).not.toHaveProperty('providerOutcome');
+
+    const invalid = fakeProcess(stream(init, success('CROSS-REVIEW-RESULT: 0 findings')));
+    const invalidPending = run(options, { spawn: invalid.spawn });
+    invalid.child.emit('spawn');
+    const invalidReport = await invalidPending.catch((error: unknown) => error);
+    expect(invalidReport).toBeInstanceOf(Error);
+    expect(invalidReport).not.toHaveProperty('providerOutcome');
   });
 
   it('kills and waits for the child tree when cancellation arrives during review', async () => {
@@ -228,7 +290,9 @@ describe('runClaudeReview', () => {
     const spawn = vi.fn<SpawnCall>(() => child);
     const killTree = vi.fn(async () => { child.emit('close', null, 'SIGTERM'); });
 
-    await expect(run({ ...options, timeoutMs: 1 }, { spawn, killTree })).rejects.toThrow(/timed out/i);
+    const pending = run({ ...options, timeoutMs: 1 }, { spawn, killTree });
+    child.emit('spawn');
+    await expect(pending).rejects.toMatchObject({ providerOutcome: 'indeterminate', message: 'Claude review timed out.' });
     expect(killTree).toHaveBeenCalledOnce();
   });
 

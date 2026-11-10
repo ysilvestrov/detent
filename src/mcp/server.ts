@@ -3,7 +3,7 @@ import { realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { readAdmission as readAdmissionDefault, type RuntimeIdentity } from './registration.js';
 import { parseReviewRequest, prepareReview as prepareReviewDefault, type PreparedReview, type ReviewRequest } from './input.js';
-import { runClaudeReview as runClaudeReviewDefault, type ClaudeReviewResult } from './claude.js';
+import { IndeterminateProviderOutcomeError, runClaudeReview as runClaudeReviewDefault, type ClaudeReviewResult } from './claude.js';
 import { ADAPTERS, familyOfAuthor } from '../review/adapters.js';
 import { classifyResult, markerLine, successBody } from '../review/protocol.js';
 
@@ -84,6 +84,7 @@ export async function serveMcp(options: McpServerOptions, io: McpServerIO = {}):
   let ready = false;
   let closed = false;
   const active = new Map<string, AbortController>();
+  const cancelled = new Set<string>();
   const jobs = new Set<Promise<void>>();
   const send = (message: unknown): void => {
     if (!closed) options.output.write(`${JSON.stringify(message)}\n`);
@@ -114,7 +115,11 @@ export async function serveMcp(options: McpServerOptions, io: McpServerIO = {}):
         ready = true;
       } else if (value.method === 'notifications/cancelled' && record(value.params)) {
         const requestId = value.params.requestId;
-        if (typeof requestId === 'string' || typeof requestId === 'number') active.get(`${typeof requestId}:${requestId}`)?.abort();
+        if (typeof requestId === 'string' || typeof requestId === 'number') {
+          const cancelledKey = `${typeof requestId}:${requestId}`;
+          const pending = active.get(cancelledKey);
+          if (pending) { cancelled.add(cancelledKey); pending.abort(); }
+        }
       }
       return;
     }
@@ -185,14 +190,15 @@ export async function serveMcp(options: McpServerOptions, io: McpServerIO = {}):
           runtimeIdentity: options.identity,
           noTools: { tools: result.tools, mcpServers: result.mcpServers, toolUseCount: result.toolUseCount },
         };
-        send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: result.report }, { type: 'text', text: JSON.stringify(receipt) }], structuredContent: receipt } });
+        if (!cancelled.has(key)) send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: result.report }, { type: 'text', text: JSON.stringify(receipt) }], structuredContent: receipt } });
       } catch (error) {
         const reason = messageOf(error);
         const status = stage === 'admission' ? 'needs-action' : 'failed';
-        send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: reason }], structuredContent: { status, reason }, isError: true } });
+        if (!cancelled.has(key)) send({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: reason }], structuredContent: { status, reason, ...(error instanceof IndeterminateProviderOutcomeError ? { providerOutcome: error.providerOutcome } : {}) }, isError: true } });
       } finally {
         clearTimeout(deadlineTimer);
         active.delete(key);
+        cancelled.delete(key);
       }
     })();
     jobs.add(job);
