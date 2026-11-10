@@ -392,11 +392,11 @@ export async function runClaudeReview(options: ClaudeReviewOptions, io: Internal
   if (init.tools.length !== 0 || containsToolUse(events)) throw new Error('Claude tools were enabled or used.');
   const result = events[events.length - 1];
   if (!result || result.type !== 'result' || result.subtype !== 'success' || result.is_error === true || typeof result.result !== 'string' || !result.result.trim()) throw new Error('Claude returned an empty or unsuccessful report.');
+  const mode = options.mode ?? 'spec';
   const verdict = classifyResult(result.result);
   if (verdict.kind !== 'ok' || !Number.isSafeInteger(verdict.findings) || verdict.findings < 0) {
-    throw new Error(verdict.kind === 'failed' ? verdict.reason : 'Claude returned an invalid finding count.');
+    throw new ClaudeReportValidationError(verdict.kind === 'failed' ? verdict.reason : 'Claude returned an invalid finding count.', mode, result.result);
   }
-  const mode = options.mode ?? 'spec';
   try {
     validateReport(result.result, mode, options.coverage ?? []);
   } catch (error) {

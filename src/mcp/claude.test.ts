@@ -71,13 +71,15 @@ describe('runClaudeReview', () => {
   });
 
   it('retains only a bounded untrusted report tail for completed invalid evidence', async () => {
-    const report = `discarded-prefix${'x'.repeat(9000)}\n${validReport}\nCHECK: tests | not-verified | evidence: []\nCROSS-REVIEW-RESULT: 0 findings`;
+    const suffix = `\n${validReport}\nCHECK: tests | not-verified | evidence: []\nCROSS-REVIEW-RESULT: 0 findings`;
+    const expectedTail = 'x'.repeat(8192 - suffix.length) + suffix;
+    const report = `discarded-prefix${expectedTail}`;
     const { spawn, child } = fakeProcess(stream(init, success(report)));
     const pending = run(options, { spawn, env: { ANTHROPIC_API_KEY: 'private-env-value' } });
     child.emit('spawn');
     const error: unknown = await pending.catch((error: unknown) => error);
     expect(error).toBeInstanceOf(ClaudeReportValidationError);
-    expect(error).toMatchObject({ message: 'Claude report has invalid or duplicate check evidence.', mode: 'spec', expectedChecks: ['requirements', 'constitution', 'format', 'implementation', 'reuse'], untrustedReportTail: report.slice(-8192) });
+    expect(error).toMatchObject({ message: 'Claude report has invalid or duplicate check evidence.', mode: 'spec', expectedChecks: ['requirements', 'constitution', 'format', 'implementation', 'reuse'], untrustedReportTail: expectedTail });
     expect(error).not.toHaveProperty('providerOutcome');
     expect(JSON.stringify(error)).not.toContain('private-env-value');
     expect(JSON.stringify(error)).not.toContain(options.text);
@@ -94,12 +96,29 @@ describe('runClaudeReview', () => {
     await expect(run(options, { spawn })).rejects.toMatchObject({ name: 'ClaudeReportValidationError', message: 'Claude report has invalid or duplicate check evidence.' });
   });
 
-  it('does not attach report diagnostics to stream, model, tool or count refusals', async () => {
+  it.each([
+    ['Review complete.', 'output does not end with a CROSS-REVIEW-RESULT line'],
+    ['CROSS-REVIEW-RESULT: 9007199254740992 findings', 'Claude returned an invalid finding count.'],
+  ])('retains bounded diagnostics when a completed report has an invalid final count: %s', async (lastLine, reason) => {
+    const suffix = `\n${lastLine}`;
+    const expectedTail = 'x'.repeat(8192 - suffix.length) + suffix;
+    const { spawn, child } = fakeProcess(stream(init, success(`discarded-prefix${expectedTail}`)));
+    const pending = run({ ...options, mode: 'diff' }, { spawn });
+    child.emit('spawn');
+    const error: unknown = await pending.catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(ClaudeReportValidationError);
+    expect(error).toMatchObject({ message: reason, mode: 'diff', expectedChecks: ['constitution', 'implementation', 'tests', 'reuse'], untrustedReportTail: expectedTail });
+    expect(error).not.toHaveProperty('marker');
+    expect(error).not.toHaveProperty('providerOutcome');
+  });
+
+  it('does not attach report diagnostics to stream, model, tool or unsuccessful-result refusals', async () => {
     for (const output of [
       'not-json',
       stream({ ...init, model: 'gpt-5' }, success()),
       stream({ ...init, tools: ['Read'] }, success()),
-      stream(init, success('Review complete.')),
+      stream(init, { ...success(), is_error: true }),
+      stream(init, success('')),
     ]) {
       const { spawn } = fakeProcess(output);
       const error: unknown = await run(options, { spawn }).catch((error: unknown) => error);
@@ -108,6 +127,12 @@ describe('runClaudeReview', () => {
       expect(error).not.toHaveProperty('untrustedReportTail');
       expect(error).not.toHaveProperty('providerOutcome');
     }
+    const { spawn } = fakeProcess(stream(init, success()));
+    const refusal: unknown = await run(options, { spawn, env: { ANTHROPIC_BASE_URL: 'https://proxy.invalid' } }).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(Error);
+    expect(refusal).not.toBeInstanceOf(ClaudeReportValidationError);
+    expect(refusal).not.toHaveProperty('untrustedReportTail');
+    expect(spawn).not.toHaveBeenCalled();
   });
 
   it('rejects a count-only report and unsupported path evidence', async () => {
@@ -177,7 +202,7 @@ describe('runClaudeReview', () => {
     const positive = fakeProcess(stream(init, success(report)));
     await expect(run({ ...options, mode: 'diff', coverage }, { spawn: positive.spawn })).resolves.toMatchObject({ report });
     const unknown = fakeProcess(stream(init, success(report.replace('"src/shared.ts"', '"outside.ts"'))));
-    await expect(run({ ...options, mode: 'diff', coverage }, { spawn: unknown.spawn })).rejects.toThrow(/outside supplied coverage/i);
+    await expect(run({ ...options, mode: 'diff', coverage }, { spawn: unknown.spawn })).rejects.toMatchObject({ name: 'ClaudeReportValidationError', message: 'Claude report cites evidence outside supplied coverage: implementation.' });
     const missingOnly = coverage.map((item) => item.path === 'constitution/constitution.md' ? { ...item, status: 'missing' as const } : item);
     const unsupported = fakeProcess(stream(init, success(report)));
     await expect(run({ ...options, mode: 'diff', coverage: missingOnly }, { spawn: unsupported.spawn })).rejects.toThrow(/included evidence/i);
@@ -220,7 +245,7 @@ describe('runClaudeReview', () => {
 
   it('rejects a model outside the Claude family', async () => {
     const { spawn } = fakeProcess(stream({ ...init, model: 'gpt-5' }, success()));
-    await expect(run(options, { spawn })).rejects.toThrow(/model/i);
+    await expect(run(options, { spawn })).rejects.toThrowError(new Error('Claude initialization reported an invalid or unknown model family.'));
   });
 
   it('rejects a stream model that does not match the authorized model selection', async () => {
@@ -254,11 +279,11 @@ describe('runClaudeReview', () => {
 
   it('requires one init before exactly one terminal successful result', async () => {
     const resultFirst = fakeProcess(stream(success(), init));
-    await expect(run(options, { spawn: resultFirst.spawn })).rejects.toThrow(/single terminal result/i);
+    await expect(run(options, { spawn: resultFirst.spawn })).rejects.toThrowError(new Error('Claude stream must contain one init followed by a single terminal result.'));
     const duplicateInit = fakeProcess(stream(init, init, success()));
-    await expect(run(options, { spawn: duplicateInit.spawn })).rejects.toThrow(/single terminal result/i);
+    await expect(run(options, { spawn: duplicateInit.spawn })).rejects.toThrowError(new Error('Claude stream must contain one init followed by a single terminal result.'));
     const lateError = fakeProcess(stream(init, success(), { type: 'result', subtype: 'error', is_error: true }));
-    await expect(run(options, { spawn: lateError.spawn })).rejects.toThrow(/single terminal result/i);
+    await expect(run(options, { spawn: lateError.spawn })).rejects.toThrowError(new Error('Claude stream must contain one init followed by a single terminal result.'));
   });
 
   it('rejects a success result marked as an error', async () => {
@@ -268,7 +293,7 @@ describe('runClaudeReview', () => {
 
   it('rejects tool use even when initialization advertised no tools', async () => {
     const { spawn } = fakeProcess(stream(init, { type: 'assistant', content: [{ type: 'tool_use' }] }, success()));
-    await expect(run(options, { spawn })).rejects.toThrow(/tool/i);
+    await expect(run(options, { spawn })).rejects.toThrowError(new Error('Claude tools were enabled or used.'));
   });
 
   it.each(['server_tool_use', 'mcp_tool_use', 'tool_result', 'server_tool_result', 'mcp_tool_result', 'tool_use_summary'])('rejects observed %s evidence despite empty init tools', async (type) => {
@@ -414,6 +439,20 @@ describe('runClaudeReview', () => {
 
     await expect(pending).rejects.toThrow(/exceeded 12 bytes/i);
     expect(killTree).toHaveBeenCalledOnce();
+  });
+
+  it('accepts the exact valid stream byte limit and rejects one byte less', async () => {
+    const fixture = stream(init, success());
+    const bytes = Buffer.byteLength(fixture, 'utf8');
+    const exact = fakeProcess(fixture);
+    const exactKillTree = vi.fn(async () => { exact.child.emit('close', null, 'SIGTERM'); });
+    await expect(run({ ...options, maxOutputBytes: bytes }, { spawn: exact.spawn, killTree: exactKillTree })).resolves.toEqual({ report: validReport, findings: 0, model: init.model, tools: [], mcpServers: [], toolUseCount: 0 });
+    expect(exactKillTree).not.toHaveBeenCalled();
+
+    const over = fakeProcess(fixture);
+    const overKillTree = vi.fn(async () => { over.child.emit('close', null, 'SIGTERM'); });
+    await expect(run({ ...options, maxOutputBytes: bytes - 1 }, { spawn: over.spawn, killTree: overKillTree })).rejects.toThrowError(new Error(`Claude output exceeded ${bytes - 1} bytes.`));
+    expect(overKillTree).toHaveBeenCalledOnce();
   });
 
   it('does not pass preload or shell injection variables to Claude', async () => {

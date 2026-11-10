@@ -1,7 +1,7 @@
 # Завершене встановлення Detent і проєктний дозвіл на cross-review
 
 Дата: 2026-11-09
-Статус: затверджено продовженням власника 2026-11-09, реалізацію розпочато
+Статус: затверджено 2026-11-09
 Spec-review: claude/default @ 8a1d7c7 (author: codex) — 12 findings: 12 fixed, 0 rejected
 
 Ця редакція замінює попередній privileged launcher та пропозицію платформного host з Д-1. Попередні рішення й рев'ю доступні в Git. Поточний продукт ще не реалізує цей контракт. Уже написані runtime contract/store є придатними для повторного використання частинами.
@@ -14,7 +14,7 @@ Spec-review: claude/default @ 8a1d7c7 (author: codex) — 12 findings: 12 fixed,
 
 ### Що зміниться для тебе
 
-`detent install` показує версію, шляхи, reviewer-провайдерів, передачу committed-матеріалів і витрати лімітів. Згода охоплює repo та перевірені Git-worktrees; зміна версії/прав/провайдерів потребує update. CLI має бути автентифікована, каталог — довірений хостом. Перший Codex adapter — Claude, без agy-fallback до окремої проби. Без придатного Claude setup неповний. Claude/Antigravity зберігають чинні npx, скіли та вибір reviewer.
+`detent install` показує версію, шляхи, reviewer-провайдерів, передачу матеріалів і витрати лімітів. Переданий провайдеру текст і вже витрачений ліміт відкликати неможливо. Згода охоплює repo та перевірені Git-worktrees; зміна версії/прав/провайдерів потребує update. Потрібні auth CLI та довіра хоста. Перший Codex adapter — Claude на Windows; інші ОС та agy-fallback потребують проби, до неї setup неповний. Claude/Antigravity зберігають чинні npx, скіли та reviewer.
 
 ### На чому стоїть рішення
 
@@ -28,7 +28,7 @@ Spec-review: claude/default @ 8a1d7c7 (author: codex) — 12 findings: 12 fixed,
 2. Самодостатній Node-пакет поза writable roots; імпорт проєктного коду відкинуто як небезпечний.
 3. Committed-текст без tools; читання checkout і запуск тестів відкинуто через ширші права.
 4. Захищені config/state та довірений install approval; підтвердження кожного review не виконує мету.
-5. Файли, effective grant і live-доступність мають окремі статуси; копіювання не доводить готовності.
+5. Файли, effective grant і live-доступність мають окремі статуси; єдиний зелений статус після копіювання відкинуто як недоведений.
 
 ### Що стане гірше
 
@@ -36,7 +36,7 @@ Spec-review: claude/default @ 8a1d7c7 (author: codex) — 12 findings: 12 fixed,
 
 ### Оцінка
 
-Власник L. Автор L, 2–3 PR.
+Власник L. Автор L, 2–3 PR: core, окремий layout refactor, install/harness. Частки: install/транзакції 30%, MCP/worktrees 30%, renderer 15%, doctor/live 25%. Розглянуто стандартне й дешевше: лише npx/тексти; відкинуто, бо повторні дозволи лишаються.
 
 ### Питання до власника
 
@@ -148,7 +148,7 @@ Product review deadline 900 секунд збережений від чинно�
 
 Успіх повертає status=completed, report, findings/marker за чинним protocol, authorDeclared, фактичні reviewer/model/family, resolved commits, coverage, hash точного stdin payload, effectiveRoot, registration identity і no-tools observation. Completed означає отриманий валідний звіт, наявність дефектів записується окремо. Spawn/auth/error/timeout/overflow/invalid report повертають локальний failed/needs-action з причиною, без успішного marker. Після timeout/abort розпочатого reviewer окреме providerOutcome=indeterminate означає невідомий віддалений результат і можливе продовження billing. На client cancellation відповідь скасовуваного MCP request не надсилається; disconnect також може унеможливити доставку receipt. Повторне надсилання після транспортної невизначеності автоматично не робиться, щоб не створювати приховані повторні платні reviews.
 
-Якщо валідний завершений stream пройшов model/no-tools/count перевірки, але report порушує CHECK-контракт, failed-result може містити `diagnostics`: режим, очікувані перевірки та останні не більш як 8192 символи `untrustedReportTail`. Це локальна діагностика невалідного звіту, не успішний marker. Stdin, environment, credentials і raw stream до неї не додаються; вона не вмикає повторного платного запуску.
+Якщо валідний завершений stream пройшов model/no-tools перевірки, але report порушує CHECK-контракт або вимоги до фінального count-рядка, failed-result може містити `diagnostics`: режим, очікувані перевірки та останні не більш як 8192 символи `untrustedReportTail`. Це локальна діагностика невалідного звіту, не успішний marker. Stdin, environment, credentials і raw stream до неї не додаються; вона не вмикає повторного платного запуску.
 
 ## Повторюваність і часткові помилки
 
@@ -190,7 +190,7 @@ Usage exit 2, preflight conflict 4, незавершений setup 6. Permission
 
 ### П-9. Захист config і виконуваного коду від sandbox-записів
 
-Після зауваження К-1 виконано окрему беззаписну пробу в поточному native workspace-write sandbox. Node відкривав наявні файли лише з O_WRONLY, без записів і truncation, й порівнював SHA-256 до/після. Позитивний контроль README.md відкрився для запису. .codex/config.toml і зовнішній installed review-server.mjs отримали EPERM, хеші всіх трьох файлів не змінилися. Для exact config target тимчасово створено файл лише з коментарем, після перевірки SHA його прибрано. Settings/grants він не містив.
+Після зауваження К-1 виконано окрему беззаписну пробу в поточному native workspace-write sandbox. Node відкривав наявні файли лише з O_WRONLY, без записів і truncation, й порівнював SHA-256 до/після. Позитивний контроль README.md відкрився для запису. .codex/config.toml і зовнішній installed review-server.mjs отримали EPERM, хеші всіх трьох файлів не змінилися. Координатор окремою погодженою host-escalated операцією підготував exact config target лише з коментарем і після перевірки SHA прибрав його. Sandbox не створював цей файл; settings/grants у ньому не було. Проба не перевіряла створення відсутнього config, заміну через parent чи захист registration; ці перевірки залишаються умовами product install до grant.
 
 Результат у локальному `.superpowers/sdd/2026-11-09-cross-review-mcp-probe/evidence/active-write-boundary.json`. Поточний хост захищає власний project config і зовнішній код, як вимагає контракт. Окрема raw CLI sandbox-проба з :workspace завершилася до helper помилкою `registered Core process has no package identity`, це не доказ її файлових прав. Desktop/core і standalone CLI можуть мати різні backend/config contexts, тому адаптер не переносить native proof між ними автоматично. Для неперевірених surfaces діє needs-action gate.
 
@@ -211,7 +211,7 @@ Codex документує read-only .codex у вбудованому :workspace
 | Reviewer без інструментів | no-tools observation | Init tools/MCP і stream tool_use + canaries | П-8 CLI chain |
 | Матеріал відповідає запиту | commits/coverage/input hash | Immutable Git blobs, merge-base, точний stdin | П-8 для двох commits, merge-base product tests |
 | Review завершений | completed/marker | Валідований звіт і успішний adapter result | П-8 |
-| Причина CHECK-відмови доступна локально | failed.diagnostics | Режим/перелік із fixed contract та обмежений untrusted tail завершеного звіту; не доводить коректності висновків | Product unit tests; не додає input/env/credentials |
+| Причина відмови report доступна локально | failed.diagnostics | Режим/перелік із fixed contract та обмежений untrusted tail завершеного звіту; не доводить коректності висновків | Product unit tests; не додає input/env/credentials |
 | Grant відкликано для всього repo | revoke result | Disabled protected binding перед кожним викликом + configs | Новий product acceptance, spike перевірив лише native CLI prompt |
 | Новий worktree має той самий scope | install result | Перевірка membership + unchanged grant + exact config | П-8 для одного linked, product tests для нових |
 
