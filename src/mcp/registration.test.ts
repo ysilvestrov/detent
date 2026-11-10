@@ -81,7 +81,8 @@ describe('registration admission', () => {
     expect(pathKey(mainEntries[0] as string)).toBe(pathKey(`worktree ${resolve(f.main)}`));
     expect((await readAdmission(f.registrationPath, f.main, identity)).root).toBe(resolve(f.main));
     expect((await readAdmission(f.registrationPath, f.linked, identity)).root).toBe(resolve(f.linked));
-    await expect(readAdmission(f.registrationPath, join(f.linked, 'child'), identity)).rejects.toThrow(/root|worktree/i);
+    mkdirSync(join(f.linked, 'child'));
+    await expect(readAdmission(f.registrationPath, join(f.linked, 'child'), identity)).rejects.toThrow('cwd is not an active registered worktree');
     const other = join(f.base, 'other');
     mkdirSync(other);
     git(other, 'init', '-q');

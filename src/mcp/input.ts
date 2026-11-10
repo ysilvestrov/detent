@@ -5,6 +5,7 @@ import { normalizeSpecPath, specPathError } from '../review/preflight.js';
 import { sha256 } from '../runtime/contract.js';
 import { gitEnvironment } from './registration.js';
 import { execGitFile } from './git-process.js';
+import { findBlock } from '../install/blocks.js';
 
 export type SpecReviewRequest = {
   author: ReviewerId;
@@ -47,6 +48,16 @@ function remaining(options: GitReadOptions): number | undefined {
 class Payload {
   sections: string[] = [];
   bytes = 0;
+  private readonly emitted = new Map<string, string>();
+  private readonly covered = new Set<string>();
+  emittedText(path: string, oid: string): string | undefined { return this.emitted.get(`${path}\0${oid}`); }
+  remember(path: string, oid: string, text: string): void { this.emitted.set(`${path}\0${oid}`, text); }
+  cover(coverage: ReviewCoverage[], path: string, status: ReviewCoverage['status'], role: string): void {
+    const key = `${path}\0${status}\0${role}`;
+    if (this.covered.has(key)) return;
+    this.covered.add(key);
+    coverage.push({ path, status, role });
+  }
   add(text: string): void {
     const size = Buffer.byteLength(text, 'utf8');
     if (this.bytes + size > MAX_BYTES) throw new Error('review payload exceeds 1 MiB');
@@ -214,16 +225,26 @@ async function appendCoverage(
   explicit = false,
   options: GitReadOptions = {},
 ): Promise<void> {
-  const text = await safeText(root, exe, entries, path, options, payload);
-  if (text === undefined) {
-    coverage.push({ path, status: 'missing', role });
+  safeCommitPath(path);
+  const entry = entries.get(path);
+  if (!entry) {
+    payload.cover(coverage, path, 'missing', role);
     if (explicit) {
       throw new Error(`explicit context path is missing at commit: ${path}`);
     }
     return;
   }
-  coverage.push({ path, status: 'included', role });
-  payload.add(`\n===== ${role}: ${path} (untrusted committed data) =====\n${text}`);
+  const alreadyEmitted = payload.emittedText(path, entry.oid);
+  const text = alreadyEmitted ?? await blob(root, exe, entry, options, MAX_BYTES - payload.bytes);
+  payload.cover(coverage, path, 'included', role);
+  if (alreadyEmitted === undefined) {
+    payload.add(`\n===== ${role}: ${path} (untrusted committed data) =====\n${text}`);
+    payload.remember(path, entry.oid, text);
+  }
+  if (role === 'project guidance' && (path === 'AGENTS.md' || path === 'CLAUDE.md')) {
+    const marked = findBlock(text);
+    if (marked.kind === 'one' && marked.inner.trim()) payload.cover(coverage, path, 'included', 'constitution');
+  }
 }
 
 export async function prepareReview(root: string, gitExecutable: string, request: ReviewRequest, options: GitReadOptions = {}): Promise<PreparedReview> {
@@ -242,7 +263,7 @@ export async function prepareReview(root: string, gitExecutable: string, request
     const fixed = [
       ['AGENTS.md', 'project guidance'], ['CLAUDE.md', 'project guidance'], ['package.json', 'package manifest'], ['detent.json', 'project config'],
       [config.specFile, 'root spec'], ['constitution/constitution.md', 'constitution'],
-      ['.agents/skills/detent-design-spec/spec-format.md', 'spec format'], ['.claude/skills/detent-design-spec/spec-format.md', 'spec format'],
+      ['.agents/skills/detent-design-spec/spec-format.md', 'spec format'], ['.claude/skills/detent-design-spec/spec-format.md', 'spec format'], ['skills/design-spec/spec-format.md', 'spec format'],
       ['.detent/prompts/review-spec.md', 'review guidance'], ['.detent/prompts/review-diff.md', 'review guidance'],
     ] as const;
     for (const [p, role] of fixed) await appendCoverage(root, gitExecutable, entries, coverage, payload, p, role, false, options);
@@ -272,7 +293,7 @@ export async function prepareReview(root: string, gitExecutable: string, request
     changed.push({ status, paths });
   }
   const config = await configAt(root, gitExecutable, headTree, options, payload);
-  const diffRaw = await git(root, gitExecutable, ['--literal-pathspecs', 'diff', '--no-ext-diff', '--no-textconv', '--ignore-submodules=none', '--find-renames', '--no-color', '--no-prefix', '--binary', mergeBase, head], options, MAX_BYTES - payload.bytes);
+  const diffRaw = await git(root, gitExecutable, ['--literal-pathspecs', 'diff', '--no-ext-diff', '--no-textconv', '--ignore-submodules=none', '--find-renames', '--no-color', '--no-prefix', '--binary', '--text', mergeBase, head], options, MAX_BYTES - payload.bytes);
   let diff: string;
   try { diff = new TextDecoder('utf-8', { fatal: true }).decode(diffRaw); }
   catch { throw new Error('invalid UTF-8 committed diff'); }

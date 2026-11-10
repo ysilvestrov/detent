@@ -16,6 +16,14 @@ export interface ClaudeReviewResult {
   mcpServers: [];
   toolUseCount: 0;
 }
+/** Internal signal: a started provider process was interrupted locally. */
+export class IndeterminateProviderOutcomeError extends Error {
+  readonly providerOutcome = 'indeterminate' as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'IndeterminateProviderOutcomeError';
+  }
+}
 export interface ClaudeReviewOptions {
   reviewer: ClaudeReviewer;
   text: string;
@@ -160,11 +168,20 @@ function parseStream(output: string): Record<string, unknown>[] {
   return events;
 }
 
+const TOOL_EVIDENCE_TYPES = new Set([
+  'tool_use', 'server_tool_use', 'mcp_tool_use',
+  'tool_result', 'server_tool_result', 'mcp_tool_result',
+  'tool_use_summary', 'server_tool_use_summary', 'mcp_tool_use_summary',
+]);
 function containsToolUse(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(containsToolUse);
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
-  return record.type === 'tool_use' || Object.values(record).some(containsToolUse);
+  return (typeof record.type === 'string' && TOOL_EVIDENCE_TYPES.has(record.type))
+    || (typeof record.subtype === 'string' && TOOL_EVIDENCE_TYPES.has(record.subtype))
+    || (typeof record.tool_use_count === 'number' && record.tool_use_count > 0)
+    || (typeof record.toolUseCount === 'number' && record.toolUseCount > 0)
+    || Object.values(record).some(containsToolUse);
 }
 
 function emptyServers(value: unknown): boolean {
@@ -227,11 +244,13 @@ async function collectProcess(options: ClaudeReviewOptions, io: InternalIO): Pro
     let stdoutBytes = 0;
     let stderrBytes = 0;
     let terminationReason: Error | undefined;
+    let actuallySpawned = false;
     let settled = false;
     let killing: Promise<void> | undefined;
     let resolveClosed!: () => void;
     const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
     let didClose = false;
+    child.once('spawn', () => { actuallySpawned = true; });
     const timer = setTimeout(() => terminate(new Error('Claude review timed out.')), timeoutMs);
     const signal = options.signal;
 
@@ -242,6 +261,10 @@ async function collectProcess(options: ClaudeReviewOptions, io: InternalIO): Pro
       signal?.removeEventListener('abort', onAbort);
       if (error) reject(error);
       else resolve(value ?? Buffer.alloc(0));
+    };
+    const interruptionError = (): Error => {
+      const reason = terminationReason ?? new Error('Claude process cleanup could not be verified.');
+      return actuallySpawned ? new IndeterminateProviderOutcomeError(reason.message) : reason;
     };
     const terminate = (reason: Error) => {
       if (settled || terminationReason) return;
@@ -281,7 +304,7 @@ async function collectProcess(options: ClaudeReviewOptions, io: InternalIO): Pro
         if (!closedInTime) terminationReason = new Error(`${terminationReason.message} Original process cleanup is unverified; process may still be running.`);
         else if (cleanupFailed) terminationReason = new Error(`${terminationReason.message} Original process exited, but process-tree cleanup is unverified.`);
       })();
-      void killing.then(() => { if (!didClose) settle(terminationReason ?? new Error('Claude process cleanup could not be verified.')); });
+      void killing.then(() => { if (!didClose) settle(interruptionError()); });
     };
     const onAbort = () => terminate(new Error('Claude review was aborted.'));
     signal?.addEventListener('abort', onAbort, { once: true });
@@ -304,12 +327,12 @@ async function collectProcess(options: ClaudeReviewOptions, io: InternalIO): Pro
     child.stderr?.on('data', (chunk: Buffer | string) => collect(chunk, false));
     child.stdout?.once('error', () => terminate(new Error('Claude stdout stream failed.')));
     child.stderr?.once('error', () => terminate(new Error('Claude stderr stream failed.')));
-    child.once('error', (error) => settle(new Error(`Could not start Claude: ${error.message}`)));
+    child.once('error', (error) => { if (!terminationReason) settle(new Error(`Could not start Claude: ${error.message}`)); });
     child.once('close', async (code, exitSignal) => {
       didClose = true;
       resolveClosed();
       if (killing) await killing;
-      if (terminationReason) return settle(terminationReason);
+      if (terminationReason) return settle(interruptionError());
       if (code !== 0) {
         const diagnostic = sanitizeStderr(err);
         return settle(new Error(`Claude exited with code ${code ?? exitSignal ?? 'unknown'}.${diagnostic ? ` ${diagnostic}` : ''}`));
