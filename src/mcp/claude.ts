@@ -71,7 +71,7 @@ export class ClaudeReportValidationError extends Error {
     super(message);
     this.name = 'ClaudeReportValidationError';
     this.expectedChecks = [...checksFor(mode)];
-    this.untrustedReportTail = report.slice(-8192);
+    this.untrustedReportTail = Array.from(report).slice(-8192).join('');
   }
 }
 
