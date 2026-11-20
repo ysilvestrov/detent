@@ -3,7 +3,17 @@ import { closeSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, r
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { makeContract, parseRegistry, runtimeKey, sha256, validateContract, type RuntimeContract, type RuntimeRegistry, type RuntimeSnapshot } from './contract.js';
 
-const REGISTRY = '.detent/local/runtime.json';
+interface RuntimeLayout {
+  registry: string;
+  lock: string;
+  generationBase: string;
+}
+
+const PROJECT_LAYOUT: RuntimeLayout = {
+  registry: '.detent/local/runtime.json',
+  lock: '.detent/install.lock',
+  generationBase: '.detent/runtime',
+};
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';
 
 // Resolve from the project root without following a linked ancestor or a hard-linked file.
@@ -24,8 +34,8 @@ export function checkedPath(root: string, rel: string): string {
   return full;
 }
 
-function registry(root: string): RuntimeRegistry {
-  const path = checkedPath(root, REGISTRY);
+function registry(root: string, layout: RuntimeLayout): RuntimeRegistry {
+  const path = checkedPath(root, layout.registry);
   try { return parseRegistry(readFileSync(path, 'utf8')); }
   catch (error) {
     if (missing(error)) return { schemaVersion: 1, entries: {} };
@@ -55,10 +65,14 @@ function checkCopy(root: string, rel: string, contract: RuntimeContract): string
 }
 
 export function verifyRuntime(root: string, input: RuntimeContract): string | null {
+  return verifyRuntimeAtLayout(root, PROJECT_LAYOUT, input);
+}
+
+function verifyRuntimeAtLayout(root: string, layout: RuntimeLayout, input: RuntimeContract): string | null {
   const contract = validateContract(input);
-  const entry = registry(root).entries[runtimeKey(contract)];
+  const entry = registry(root, layout).entries[runtimeKey(contract)];
   if (!entry) return null;
-  return checkCopy(root, `.detent/runtime/${runtimeKey(contract)}/${entry.generation}`, contract);
+  return checkCopy(root, `${layout.generationBase}/${runtimeKey(contract)}/${entry.generation}`, contract);
 }
 
 export interface RuntimeStore {
@@ -67,7 +81,11 @@ export interface RuntimeStore {
 
 // The callback owns the lock for the whole install transaction, including its future skill writes.
 export function withRuntimeLock<T>(root: string, action: (store: RuntimeStore) => T): T {
-  const lock = checkedPath(root, '.detent/install.lock');
+  return withRuntimeLockAtLayout(root, PROJECT_LAYOUT, action);
+}
+
+function withRuntimeLockAtLayout<T>(root: string, layout: RuntimeLayout, action: (store: RuntimeStore) => T): T {
+  const lock = checkedPath(root, layout.lock);
   mkdirSync(dirname(lock), { recursive: true });
   let fd: number;
   try { fd = openSync(lock, 'wx'); }
@@ -85,12 +103,12 @@ export function withRuntimeLock<T>(root: string, action: (store: RuntimeStore) =
         if (!active) throw new Error('runtime store used after lock release');
         const contract = validateContract(snapshot.contract);
         if (makeContract(contract.version, snapshot.contents).digest !== contract.digest) throw new Error('runtime snapshot bytes differ from contract');
-        const state = registry(root);
+        const state = registry(root, layout);
         const key = runtimeKey(contract);
         const old = state.entries[key];
         if (old) {
           try {
-            checkCopy(root, `.detent/runtime/${key}/${old.generation}`, contract);
+            checkCopy(root, `${layout.generationBase}/${key}/${old.generation}`, contract);
             return { generation: old.generation, reused: true };
           } catch (error) {
             // Repair corrupt bytes in a fresh directory, never write through a path alias.
@@ -98,7 +116,7 @@ export function withRuntimeLock<T>(root: string, action: (store: RuntimeStore) =
           }
         }
         const generation = randomUUID();
-        const rel = `.detent/runtime/${key}/${generation}`;
+        const rel = `${layout.generationBase}/${key}/${generation}`;
         const directory = checkedPath(root, rel);
         mkdirSync(directory, { recursive: true });
         for (const [name, bytes] of Object.entries(snapshot.contents)) {
@@ -108,9 +126,9 @@ export function withRuntimeLock<T>(root: string, action: (store: RuntimeStore) =
         }
         checkCopy(root, rel, contract);
         state.entries[key] = { generation };
-        const destination = checkedPath(root, REGISTRY);
+        const destination = checkedPath(root, layout.registry);
         mkdirSync(dirname(destination), { recursive: true });
-        const temporary = checkedPath(root, `${REGISTRY}.${randomUUID()}.tmp`);
+        const temporary = checkedPath(root, `${layout.registry}.${randomUUID()}.tmp`);
         writeFileSync(temporary, JSON.stringify(state, null, 2) + '\n', { flag: 'wx' });
         renameSync(temporary, destination);
         return { generation, reused: false };
@@ -120,6 +138,6 @@ export function withRuntimeLock<T>(root: string, action: (store: RuntimeStore) =
   } finally {
     active = false;
     // An altered lock is not ours to remove. Leave it for explicit recovery.
-    if (readFileSync(checkedPath(root, '.detent/install.lock'), 'utf8') === owner) unlinkSync(lock);
+    if (readFileSync(checkedPath(root, layout.lock), 'utf8') === owner) unlinkSync(lock);
   }
 }
