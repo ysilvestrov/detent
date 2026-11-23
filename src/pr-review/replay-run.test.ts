@@ -378,11 +378,18 @@ describe('replay executor pinning', () => {
     expect(Object.keys(bodyOf(bodies[0]!))).toEqual(['model', 'max_completion_tokens', 'response_format', 'messages']);
   });
 
-  it('turns cache writes off as CI does: on the default find, not on the default verify', async () => {
+  it('turns cache writes off as CI does: on the default find and the default verify', async () => {
     const { fetchFn, bodies } = makeFetch();
     await replay({}, { fetchFn, env: { OPENAI_API_KEY: KEY } });
 
     expect(bodyOf(bodies[0]!).prompt_cache_options).toEqual({ mode: 'explicit' });
+    expect(bodyOf(bodies[1]!).prompt_cache_options).toEqual({ mode: 'explicit' });
+  });
+
+  it('leaves cache writes on for a verify model outside the list', async () => {
+    const { fetchFn, bodies } = makeFetch();
+    await replay({}, { fetchFn, env: { OPENAI_API_KEY: KEY, AI_REVIEW_VERIFY_MODEL: 'gpt-5.5' } });
+
     expect(bodyOf(bodies[1]!)).not.toHaveProperty('prompt_cache_options');
   });
 

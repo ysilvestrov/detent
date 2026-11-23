@@ -37,16 +37,25 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
      * and 6 verified per run against gpt-5.5's 5/5/3. Cheaper tiers were measured and declined:
      * terra reaches 3-4 of the 5, luna only 2 and never raises the new-issue scope guard at all.
      *
-     * `verify` stays gpt-5.5: it is the adversarial adjudicator and agreed 15 of 15 on the verify
-     * corpus. The big test of 2026-11 kept this pair as the default; its profiles and numbers are in
-     * README.md and docs/eval/2026-11/report.md.
+     * `verify` stayed gpt-5.5: it is the adversarial adjudicator and agreed 15 of 15 on the verify
+     * corpus. The big test of 2026-11 kept that pair; its profiles and numbers are in README.md and
+     * docs/eval/2026-11/report.md.
+     *
+     * Both -> gpt-6.2-sol (2026-11-23, when gpt-5.6-sol's promotion ended and its find went to
+     * $5/$30): against the old pair re-measured in the same session it published 5, 5, 5 of #418's
+     * five defects (old 5, 4, 5) and 3, 3, 3 of #930's three (old 2, 2, 2), no false finding on the
+     * corpus, 15 of 15 as judge, at about a third of the old pair's December cost. It is louder:
+     * 11-16 published per PR against 3-6, and 13 of its 32 corpus findings unfalsifiable against 2
+     * of 11. The owner took that trade. gpt-5.5 as its judge gave the same recall and volume at the
+     * old price. Records: docs/eval/2026-11/gpt-6.2-sol/; design:
+     * docs/specs/2026-11/2026-11-23-gpt-5.6-sol-promo-end-design.md.
      */
-    defaultModels: { find: 'gpt-5.6-sol', verify: 'gpt-5.5' },
+    defaultModels: { find: 'gpt-6.2-sol', verify: 'gpt-6.2-sol' },
     /*
      * A write costs 25% over input and only an identical repeat reads it back: on warsaw-beer-bot#688
      * the next head read 0 of 23 585 written tokens, and no verify call of the big test read any.
      */
-    cacheOffModels: ['gpt-5.6-sol', 'gpt-6.1-terra', 'gpt-6.1-sol'],
+    cacheOffModels: ['gpt-5.6-sol', 'gpt-6.1-terra', 'gpt-6.1-sol', 'gpt-6.2-sol'],
   },
   anthropic: {
     id: 'anthropic',

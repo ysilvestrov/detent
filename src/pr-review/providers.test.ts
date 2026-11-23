@@ -8,7 +8,7 @@ const fmt = { name: 'review', schema: SCHEMA };
 
 describe('providers table', () => {
   it('table', () => {
-    expect(PROVIDERS.openai).toMatchObject({ endpoint: 'https://api.openai.com/v1', keyEnv: 'OPENAI_API_KEY', defaultModels: { find: 'gpt-5.6-sol', verify: 'gpt-5.5' } });
+    expect(PROVIDERS.openai).toMatchObject({ endpoint: 'https://api.openai.com/v1', keyEnv: 'OPENAI_API_KEY', defaultModels: { find: 'gpt-6.2-sol', verify: 'gpt-6.2-sol' }, cacheOffModels: ['gpt-5.6-sol', 'gpt-6.1-terra', 'gpt-6.1-sol', 'gpt-6.2-sol'] });
     expect(PROVIDERS.anthropic).toMatchObject({ endpoint: 'https://api.anthropic.com/v1', keyEnv: 'ANTHROPIC_API_KEY' });
     expect(PROVIDERS.openrouter).toMatchObject({ endpoint: 'https://openrouter.ai/api/v1', keyEnv: 'OPENROUTER_API_KEY', extraBody: { provider: { require_parameters: true } } });
   });
@@ -53,7 +53,7 @@ describe('selectProvider', () => {
 
 describe('resolveModels', () => {
   it('openai defaults', () => {
-    expect(resolveModels(PROVIDERS.openai, {})).toEqual({ ok: true, find: 'gpt-5.6-sol', verify: 'gpt-5.5' });
+    expect(resolveModels(PROVIDERS.openai, {})).toEqual({ ok: true, find: 'gpt-6.2-sol', verify: 'gpt-6.2-sol' });
   });
   it('configured models override', () => {
     expect(resolveModels(PROVIDERS.openai, { findModel: 'a', verifyModel: 'b' })).toEqual({ ok: true, find: 'a', verify: 'b' });
