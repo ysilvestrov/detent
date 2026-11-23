@@ -1,0 +1,11 @@
+{
+  "a60e2aee7b65": {"defects": ["R1", "R2"], "findings": 5},
+  "6d7c103f2c66": {"defects": ["R1", "R2", "R3"], "findings": 16},
+  "b2900c50164d": {"defects": ["R1", "R2", "R3"], "findings": 12},
+  "a770afbb0197": {"defects": ["R1", "R2"], "findings": 5},
+  "4d0a77c0f661": {"defects": ["R1", "R2", "R3"], "findings": 13},
+  "4b61841892f6": {"defects": ["R1", "R3"], "findings": 3},
+  "a4d9bfc9f415": {"defects": ["R1", "R2", "R3"], "findings": 11},
+  "e276c3cf4274": {"defects": ["R1", "R2", "R3"], "findings": 12},
+  "b8c7a0544810": {"defects": ["R1", "R2", "R3"], "findings": 16}
+}
