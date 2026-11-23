@@ -1,0 +1,11 @@
+{
+  "d9332b4d46ef": {"defects": ["D1", "D2", "D3", "D4", "D5"], "findings": 13},
+  "d8abd64d80c5": {"defects": ["D1", "D2", "D3", "D4", "D5"], "findings": 12},
+  "2aa0d740db34": {"defects": ["D2", "D3", "D4", "D5"], "findings": 6},
+  "26f4ba11e070": {"defects": ["D1", "D2", "D3", "D4", "D5"], "findings": 6},
+  "90e40a2bd9bd": {"defects": ["D1", "D2", "D3", "D4", "D5"], "findings": 6},
+  "b5bb27c7e6b1": {"defects": ["D1", "D2", "D3", "D4", "D5"], "findings": 12},
+  "976d6e54ee55": {"defects": ["D1", "D2", "D3", "D4", "D5"], "findings": 12},
+  "a495a3f04895": {"defects": ["D1", "D2", "D3", "D4", "D5"], "findings": 11},
+  "663bca58e9cb": {"defects": ["D1", "D2", "D3", "D4", "D5"], "findings": 12}
+}
