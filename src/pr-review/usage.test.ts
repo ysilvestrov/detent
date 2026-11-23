@@ -15,6 +15,9 @@ import {
 /** Inside gpt-5.6-sol's promotion, so its promo row applies. */
 const PROMO = new Date('2026-11-23T00:00:00.000Z');
 
+/** `costUsd` at PROMO, so no test depends on the clock. */
+const costAtPromo = (model: string, u: Parameters<typeof costUsd>[1]): number | null => costUsd(model, u, PROMO);
+
 describe('parseUsage', () => {
   it('reads the OpenAI usage block including cached and reasoning details', () => {
     const u = parseUsage({
@@ -88,7 +91,7 @@ describe('addUsage', () => {
 describe('costUsd', () => {
   it('bills uncached input, cached input and output at their own rates', () => {
     // gpt-5.5: $5/M input, $0.50/M cached input, $30/M output.
-    const cost = costUsd('gpt-5.5', {
+    const cost = costAtPromo('gpt-5.5', {
       calls: 1,
       promptTokens: 200_000,
       cachedTokens: 80_000,
@@ -103,13 +106,13 @@ describe('costUsd', () => {
   });
 
   it('does not bill reasoning tokens twice — they are already inside completion_tokens', () => {
-    const withReasoning = costUsd('gpt-5.5', {
+    const withReasoning = costAtPromo('gpt-5.5', {
       calls: 1, promptTokens: 0, cachedTokens: 0, completionTokens: 1000, reasoningTokens: 900,
       cacheWriteTokens: 0,
       reportedUsd: null,
       maxPromptTokens: 0,
     });
-    const without = costUsd('gpt-5.5', {
+    const without = costAtPromo('gpt-5.5', {
       calls: 1, promptTokens: 0, cachedTokens: 0, completionTokens: 1000, reasoningTokens: 0,
       cacheWriteTokens: 0,
       reportedUsd: null,
@@ -122,7 +125,7 @@ describe('costUsd', () => {
     // Real usage, not EMPTY_USAGE: a stage that never called anything costs 0
     // at any model, so an empty one would pass this test without testing it.
     expect(
-      costUsd('gpt-9-imaginary', {
+      costAtPromo('gpt-9-imaginary', {
         calls: 1, promptTokens: 1000, cachedTokens: 0, completionTokens: 100, reasoningTokens: 0,
         cacheWriteTokens: 0,
         reportedUsd: null,
@@ -177,24 +180,24 @@ describe('the long-context tier', () => {
 
   it('prices a call of exactly 272 000 input tokens on the flat row', () => {
     // 272k * $5/M
-    expect(costUsd('gpt-5.5', call(272_000))).toBeCloseTo(1.36, 6);
+    expect(costAtPromo('gpt-5.5', call(272_000))).toBeCloseTo(1.36, 6);
   });
 
   it('leaves a call over 272 000 input tokens unpriced, because the row does not cover it', () => {
-    expect(costUsd('gpt-5.5', call(272_001))).toBeNull();
+    expect(costAtPromo('gpt-5.5', call(272_001))).toBeNull();
   });
 
   it('judges by the largest call, not by the stage\'s total', () => {
     // Two 150k calls sum to 300k but neither crosses the tier: 300k * $5/M.
-    expect(costUsd('gpt-5.5', addUsage(call(150_000), call(150_000)))).toBeCloseTo(1.5, 6);
+    expect(costAtPromo('gpt-5.5', addUsage(call(150_000), call(150_000)))).toBeCloseTo(1.5, 6);
   });
 
   it('lets the provider\'s own figure win over the tier', () => {
-    expect(costUsd('gpt-5.5', { ...call(400_000), reportedUsd: 3.21 })).toBe(3.21);
+    expect(costAtPromo('gpt-5.5', { ...call(400_000), reportedUsd: 3.21 })).toBe(3.21);
   });
 
   it('prices a usage that never recorded its largest call on the flat row', () => {
-    expect(costUsd('gpt-5.5', { ...call(400_000), maxPromptTokens: 0 })).toBeCloseTo(2, 6);
+    expect(costAtPromo('gpt-5.5', { ...call(400_000), maxPromptTokens: 0 })).toBeCloseTo(2, 6);
   });
 
   it('reads the largest call from the usage block', () => {
@@ -248,12 +251,12 @@ describe('costUsd — a stage that made no calls', () => {
   it('costs nothing even at a model with no verified price', () => {
     // Zero tokens cost zero dollars whatever the rates are; returning null here
     // would mark a whole run unpriced because a skipped stage had no price.
-    expect(costUsd('some-unpriced-model', EMPTY_USAGE)).toBe(0);
-    expect(costUsd('gpt-5.5', EMPTY_USAGE)).toBe(0);
+    expect(costAtPromo('some-unpriced-model', EMPTY_USAGE)).toBe(0);
+    expect(costAtPromo('gpt-5.5', EMPTY_USAGE)).toBe(0);
   });
 
   it('still refuses to price real usage at an unknown model', () => {
-    expect(costUsd('some-unpriced-model', { ...EMPTY_USAGE, calls: 1, promptTokens: 10, reportedUsd: null })).toBeNull();
+    expect(costAtPromo('some-unpriced-model', { ...EMPTY_USAGE, calls: 1, promptTokens: 10, reportedUsd: null })).toBeNull();
   });
 });
 
@@ -261,7 +264,7 @@ describe('costUsd — the zero-cost shortcut means "nothing happened at all"', (
   it('still prices tokens that arrived without a call count', () => {
     // The guard exists for a stage that never ran; money lives in the token
     // fields, so an inconsistent usage must be priced, never silently zeroed.
-    const usd = costUsd('gpt-5.5', {
+    const usd = costAtPromo('gpt-5.5', {
       calls: 0, promptTokens: 1000, cachedTokens: 0, completionTokens: 100, reasoningTokens: 0,
       cacheWriteTokens: 0,
       reportedUsd: null,
@@ -271,7 +274,7 @@ describe('costUsd — the zero-cost shortcut means "nothing happened at all"', (
   });
 
   it('prices cached input tokens, which are billable on their own', () => {
-    const usd = costUsd('gpt-5.5', {
+    const usd = costAtPromo('gpt-5.5', {
       calls: 1, promptTokens: 0, cachedTokens: 1000, completionTokens: 0, reasoningTokens: 0,
       cacheWriteTokens: 0,
       reportedUsd: null,
@@ -284,7 +287,7 @@ describe('costUsd — the zero-cost shortcut means "nothing happened at all"', (
     // parseUsage(undefined) counts the call with zero tokens. The dollars are
     // unknown, not zero: reporting $0 would drop the `+` lower-bound marker and
     // claim a precision we do not have.
-    expect(costUsd('some-unpriced-model', parseUsage(undefined))).toBeNull();
+    expect(costAtPromo('some-unpriced-model', parseUsage(undefined))).toBeNull();
   });
 });
 
@@ -293,7 +296,7 @@ describe('costUsd — a call whose usage block never arrived', () => {
     // A completion always consumed tokens; if the API did not tell us how many,
     // printing $0.00 claims a precision we do not have. Unknown is admitted the
     // same way an unpriced model is: no dollars, and the PR total marked `+`.
-    expect(costUsd('gpt-5.5', parseUsage(undefined))).toBeNull();
+    expect(costAtPromo('gpt-5.5', parseUsage(undefined))).toBeNull();
   });
 });
 
@@ -314,15 +317,15 @@ describe('costUsd: cache writes', () => {
   });
 
   it('bills a write at the input price on a model with no write tariff', () => {
-    expect(costUsd('gpt-5.5', { ...usage, cacheWriteTokens: 200_000 })).toBeCloseTo(1, 6);
+    expect(costAtPromo('gpt-5.5', { ...usage, cacheWriteTokens: 200_000 })).toBeCloseTo(1, 6);
   });
 
   it('bills a cached token at the input price on a model with no cached price', () => {
-    expect(costUsd('claude-sonnet-5-5', { ...usage, cachedTokens: 200_000 })).toBeCloseTo(0.4, 6);
+    expect(costAtPromo('claude-sonnet-5-5', { ...usage, cachedTokens: 200_000 })).toBeCloseTo(0.4, 6);
   });
 
   it('leaves claude-haiku-5-5 unpriced, because its tier over 100k tokens has no row', () => {
-    expect(costUsd('claude-haiku-5-5', parseUsage({ prompt_tokens: 110_000, completion_tokens: 1000 }))).toBeNull();
+    expect(costAtPromo('claude-haiku-5-5', parseUsage({ prompt_tokens: 110_000, completion_tokens: 1000 }))).toBeNull();
   });
 
   it('reads the write counter from the usage block', () => {
@@ -338,15 +341,15 @@ describe('costUsd: usage.cost', () => {
   const priced = { prompt_tokens: 1000, completion_tokens: 10, cost: 0.1234 };
 
   it('prefers the figure in the response to the table', () => {
-    expect(costUsd('gpt-5.5', parseUsage(priced))).toBe(0.1234);
+    expect(costAtPromo('gpt-5.5', parseUsage(priced))).toBe(0.1234);
   });
 
   it('prices a model the table does not know', () => {
-    expect(costUsd('vendor/unlisted', parseUsage(priced))).toBe(0.1234);
+    expect(costAtPromo('vendor/unlisted', parseUsage(priced))).toBe(0.1234);
   });
 
   it('falls back to the table without the figure', () => {
-    expect(costUsd('gpt-5.5', parseUsage({ prompt_tokens: 200_000 }))).toBeCloseTo(1, 6);
+    expect(costAtPromo('gpt-5.5', parseUsage({ prompt_tokens: 200_000 }))).toBeCloseTo(1, 6);
   });
 
   it.each([['a string', '0.12'], ['a negative number', -1], ['null', null]])('ignores %s', (_name, cost) => {
@@ -354,11 +357,11 @@ describe('costUsd: usage.cost', () => {
   });
 
   it('keeps a reported zero as a price', () => {
-    expect(costUsd('vendor/free', parseUsage({ prompt_tokens: 10, cost: 0 }))).toBe(0);
+    expect(costAtPromo('vendor/free', parseUsage({ prompt_tokens: 10, cost: 0 }))).toBe(0);
   });
 
   it('leaves zero tokens unpriced even with a figure', () => {
-    expect(costUsd('gpt-5.5', parseUsage({ cost: 0.5 }))).toBeNull();
+    expect(costAtPromo('gpt-5.5', parseUsage({ cost: 0.5 }))).toBeNull();
   });
 
   it('sums the figures of several calls', () => {
@@ -369,7 +372,7 @@ describe('costUsd: usage.cost', () => {
   it('drops the figure when one call did not report it, so the table prices the whole stage', () => {
     const sum = addUsage(parseUsage(priced), parseUsage({ prompt_tokens: 1000 }));
     expect(sum.reportedUsd).toBeNull();
-    expect(costUsd('vendor/unlisted', sum)).toBeNull();
+    expect(costAtPromo('vendor/unlisted', sum)).toBeNull();
   });
 });
 
@@ -392,8 +395,8 @@ describe('gpt-5.6 tiers', () => {
       maxPromptTokens: 200_000,
     };
     // luna: 200k * $0.20/M + 20k * $1.20/M; gpt-5.5: 200k * $5/M + 20k * $30/M
-    expect(costUsd('gpt-5.6-luna', usage)).toBeCloseTo(0.064, 6);
-    expect(costUsd('gpt-5.5', usage)).toBeCloseTo(1.6, 6);
+    expect(costAtPromo('gpt-5.6-luna', usage)).toBeCloseTo(0.064, 6);
+    expect(costAtPromo('gpt-5.5', usage)).toBeCloseTo(1.6, 6);
   });
 
   it('prices gpt-6.2-sol as read from the vendor page on 2026-11-23', () => {
