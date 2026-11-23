@@ -19,6 +19,8 @@ export interface Usage {
   reasoningTokens: number;
   /** The dollars the provider itself reported (`usage.cost`), or null when any call in this usage did not report them. */
   reportedUsd: number | null;
+  /** The largest `promptTokens` of any single call in this usage; 0 when unknown. A price tier is decided per call. */
+  maxPromptTokens: number;
 }
 
 export const EMPTY_USAGE: Usage = {
@@ -29,6 +31,7 @@ export const EMPTY_USAGE: Usage = {
   completionTokens: 0,
   reasoningTokens: 0,
   reportedUsd: 0,
+  maxPromptTokens: 0,
 };
 
 function num(v: unknown): number {
@@ -54,6 +57,7 @@ export function parseUsage(raw: unknown): Usage {
     completionTokens: num(u.completion_tokens),
     reasoningTokens: num(completionDetails.reasoning_tokens),
     reportedUsd: typeof u.cost === 'number' && Number.isFinite(u.cost) && u.cost >= 0 ? u.cost : null,
+    maxPromptTokens: num(u.prompt_tokens),
   };
 }
 
@@ -66,6 +70,7 @@ export function addUsage(a: Usage, b: Usage): Usage {
     completionTokens: a.completionTokens + b.completionTokens,
     reasoningTokens: a.reasoningTokens + b.reasoningTokens,
     reportedUsd: a.reportedUsd === null || b.reportedUsd === null ? null : a.reportedUsd + b.reportedUsd,
+    maxPromptTokens: Math.max(a.maxPromptTokens, b.maxPromptTokens),
   };
 }
 
@@ -78,6 +83,11 @@ export interface Price {
   cacheWrite?: number;
   /** USD per 1M output tokens (reasoning tokens included in that count). */
   output: number;
+  /**
+   * The most input tokens one call may carry at these rates. Above it the vendor bills the whole
+   * request at a higher tier, which no row models, so such usage is left unpriced. Absent: not checked.
+   */
+  flatUpTo?: number;
 }
 
 /**
@@ -85,9 +95,10 @@ export interface Price {
  * actually checked are listed: an unknown model prints tokens and no dollars,
  * because a confidently wrong number is worse than an admitted gap.
  *
- * Not modelled: the >272k-input-token tier (2x input / 1.5x output). Our
- * CONTEXT_BUDGET is 240 000 *characters* (~60k tokens), so a request cannot
- * reach it; if that budget ever grows past ~1M characters, this needs a tier.
+ * Not modelled: the >272k-input-token tier (2x input and cache / 1.5x output, for
+ * the whole request). Find cannot reach it: CONTEXT_BUDGET is 240 000 *characters*
+ * (~60k tokens). Verify can: it sends a whole file with no budget. A row whose tier
+ * was read carries `flatUpTo`, and usage with a call above it stays unpriced.
  *
  * `claude-haiku-5-5` is left out on purpose: its price rises five times over 100k
  * input tokens, and a verify call sends a whole file with no budget, so a flat row
@@ -98,12 +109,13 @@ export interface Price {
  * disagree, this table is what is wrong.
  */
 export const PRICES: Record<string, Price> = {
-  'gpt-5.5': { input: 5, cachedInput: 0.5, output: 30 },
-  'gpt-5.6-sol': { input: 4, cachedInput: 0.4, cacheWrite: 5, output: 20 },
+  'gpt-5.5': { input: 5, cachedInput: 0.5, output: 30, flatUpTo: 272_000 },
+  'gpt-5.6-sol': { input: 4, cachedInput: 0.4, cacheWrite: 5, output: 20, flatUpTo: 272_000 },
   'gpt-5.6-terra': { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12 },
   'gpt-5.6-luna': { input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1.2 },
-  'gpt-6.1-terra': { input: 1, cachedInput: 0.05, cacheWrite: 1.25, output: 5 },
-  'gpt-6.1-sol': { input: 2, cachedInput: 0.1, cacheWrite: 2.5, output: 10 },
+  'gpt-6.1-terra': { input: 1, cachedInput: 0.05, cacheWrite: 1.25, output: 5, flatUpTo: 272_000 },
+  'gpt-6.1-sol': { input: 2, cachedInput: 0.1, cacheWrite: 2.5, output: 10, flatUpTo: 272_000 },
+  'gpt-6.2-sol': { input: 2, cachedInput: 0.1, cacheWrite: 2.5, output: 10, flatUpTo: 272_000 },
   'gpt-6-astra': { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 },
   'claude-sonnet-5-5': { input: 2, output: 10 },
   'claude-opus-5-5': { input: 4, output: 20 },
@@ -111,20 +123,42 @@ export const PRICES: Record<string, Price> = {
 };
 
 /**
- * `gpt-5.6-sol`'s $4/$20 is PROMOTIONAL, guaranteed only through **2026-11-21**,
- * after which the vendor page says it may revert to its launch price of $5/$30 —
- * exactly what `gpt-5.5` costs. Nothing here breaks when that happens: the
- * footer simply starts understating the bill, silently, which is the one failure
- * this table is supposed to make impossible. Re-check on or before that date.
+ * Prices that change on a known date, per model, in ascending order of `from`. The
+ * last change whose `from` has passed replaces the `PRICES` row, so a release does
+ * not have to land on the day a price moves.
  *
+ * `gpt-5.6-sol`: the vendor page says "GPT-5.6 Sol's promotional pricing is
+ * available until November 30, 2026" and names no time zone; the owner's notice of
+ * 2026-11-23 gives $5 / $0.50 / $30 from December 1. The change is dated at the
+ * earliest midnight of December 1 anywhere (UTC+14), so whatever zone the vendor
+ * means, the footer never understates; it overstates by at most 26 hours. The
+ * write tariff is the page's "1.25x the uncached input token rate".
+ */
+export const PRICE_CHANGES: Record<string, readonly { from: string; price: Price }[]> = {
+  'gpt-5.6-sol': [
+    { from: '2026-11-30T10:00:00Z', price: { input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 30, flatUpTo: 272_000 } },
+  ],
+};
+
+/**
  * Verified independently 2026-09-22: a `gpt-5.5` call billed through a third
  * party came back at exactly this table's arithmetic, so the gpt-5.5 row is
  * ground truth and not a transcription of a web page.
  */
-export const PRICES_CHECKED_ON = '2026-11-03';
+export const PRICES_CHECKED_ON = '2026-11-23';
 
-/** Dollars for `u`: what the provider reported, else `model`'s rates, or null when we have neither. */
-export function costUsd(model: string, u: Usage): number | null {
+/** The price of `model` at `now`: its last dated change that has begun, else its `PRICES` row. */
+export function priceAt(model: string, now: Date): Price | undefined {
+  const begun = (PRICE_CHANGES[model] ?? []).filter((c) => Date.parse(c.from) <= now.getTime());
+  return begun.length > 0 ? begun[begun.length - 1]!.price : PRICES[model];
+}
+
+/**
+ * Dollars for `u`: what the provider reported, else `model`'s rates at `now`, or
+ * null when we have neither. A run is priced once, when it finishes, and kept as
+ * dollars, so `now` is that moment.
+ */
+export function costUsd(model: string, u: Usage, now: Date = new Date()): number | null {
   // Free only when nothing happened at all: no call AND no billable token. That
   // is the skipped stage this exists for — an incremental run that never runs
   // find must not mark the whole run unpriced and drop the other stage's real
@@ -142,8 +176,10 @@ export function costUsd(model: string, u: Usage): number | null {
   // The route decides the price on OpenRouter, so its own figure beats any row here.
   if (u.calls > 0 && u.reportedUsd !== null) return u.reportedUsd;
 
-  const price = PRICES[model];
+  const price = priceAt(model, now);
   if (!price) return null;
+  // A call over the row's tier was billed at rates no row holds: unknown, not this row's figure.
+  if (price.flatUpTo !== undefined && u.maxPromptTokens > price.flatUpTo) return null;
   const plainInput = Math.max(0, u.promptTokens - u.cachedTokens - u.cacheWriteTokens);
   return (
     (plainInput * price.input +

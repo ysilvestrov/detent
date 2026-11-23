@@ -129,6 +129,7 @@ describe('callStructured', () => {
       reasoningTokens: 2400,
       cacheWriteTokens: 0,
       reportedUsd: null,
+      maxPromptTokens: 7100,
     });
   });
 
@@ -229,6 +230,7 @@ describe('callStructured usage', () => {
       reasoningTokens: 32,
       cacheWriteTokens: 0,
       reportedUsd: null,
+      maxPromptTokens: 900,
     });
   });
 
