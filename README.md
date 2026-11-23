@@ -283,19 +283,28 @@ numbers will differ.
 
 ### Which models
 
-Measured on 2026-11-05 on one project, warsaw-beer-bot. Treat the numbers as evidence about that
-project, not as a ranking of the models: each comes from one or two PRs. Records, scores and the
-reasoning are in [`docs/eval/2026-11/report.en.md`](docs/eval/2026-11/report.en.md) (Ukrainian original: [`report.md`](docs/eval/2026-11/report.md)).
+Measured on one project, warsaw-beer-bot. Treat the numbers as evidence about that project, not
+as a ranking of the models: each comes from one or two PRs. The first two rows were measured on
+2026-11-23 in one session, with records, scores and grader notes in
+[`docs/eval/2026-11/gpt-6.2-sol/`](docs/eval/2026-11/gpt-6.2-sol/) and the reasoning in
+[`docs/specs/2026-11/2026-11-23-gpt-5.6-sol-promo-end-design.md`](docs/specs/2026-11/2026-11-23-gpt-5.6-sol-promo-end-design.md).
+The other rows are from 2026-11-05: [`docs/eval/2026-11/report.en.md`](docs/eval/2026-11/report.en.md) (Ukrainian original: [`report.md`](docs/eval/2026-11/report.md)).
 
 | Provider | Profile | Find + verify | Defects published on PR #418, of 5, per run | On PR #930, of 3, per run | Corpus: published, false | First full review of #418 |
 |---|---|---|---|---|---|---|
-| `openai` | Best (the default) | `gpt-5.6-sol` + `gpt-5.5` | 3, 5, 4 | 2, 3, 2 | 17, 0 | $0.47 |
-| `openai` | Balanced, best value | `gpt-6.1-terra` + `gpt-6.1-terra` | 4, 4, 4 | 1, 1, 1 | 17, 0 | $0.09 |
-| `anthropic` | All three | `claude-sonnet-5-5` + `claude-sonnet-5-5` | 4, 3, 4 | 1, 1, 1 | 6, 0 | $0.25 |
+| `openai` | Best (the default) | `gpt-6.2-sol` + `gpt-6.2-sol` | 5, 5, 5 | 3, 3, 3 | 32, 0 | $0.19 |
+| `openai` | The default before 2026-11-23 | `gpt-5.6-sol` + `gpt-5.5` | 5, 4, 5 | 2, 2, 2 | 11, 0 | $0.46, $0.56 from 2026-12-01 |
+| `openai` | Balanced (2026-11-05) | `gpt-6.1-terra` + `gpt-6.1-terra` | 4, 4, 4 | 1, 1, 1 | 17, 0 | $0.09 |
+| `anthropic` | All three (2026-11-05) | `claude-sonnet-5-5` + `claude-sonnet-5-5` | 4, 3, 4 | 1, 1, 1 | 6, 0 | $0.25 |
 | `openrouter` | None | | | | | |
 
+- **The default is loud.** `gpt-6.2-sol` publishes 11–16 findings per PR where the old pair
+  published 3–6, and 13 of its 32 on the corpus could not be checked against the code
+  (`unfalsifiable`), against 2 of 11. `gpt-6.2-sol` + `gpt-5.5` measured the same recall and the same
+  volume at the old pair's price.
 - **What the cheap pair gives up.** `gpt-6.1-terra` + `gpt-6.1-terra` loses one defect in each run
-  on #418 and finds only one of three on #930. It costs about a fifth of the default.
+  on #418 and finds only one of three on #930. It cost about a fifth of the default before
+  2026-11-23.
 - **`claude-sonnet-5-5` publishes little on the corpus.** 6 findings against 17, and none on two of
   its four PRs. It passes the admission rule, which asks for at least 3 and no false one.
 - **No OpenRouter row.** No pair went through both recall PRs and the corpus. `mimo-v2.6-pro` and
@@ -327,7 +336,7 @@ called without tools: only text and a JSON schema.
 
 | `provider` | Address | Key | Default models |
 |---|---|---|---|
-| `openai` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `gpt-5.6-sol` to find, `gpt-5.5` to verify |
+| `openai` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `gpt-6.2-sol` to find and to verify |
 | `anthropic` | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | none: set them in `prReview` |
 | `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | none: set them in `prReview` |
 
@@ -412,8 +421,12 @@ interface**: pin the exact version of the package if you import it.
 - **Spend line.** OpenRouter's own figure is used when the response has one. Otherwise a model outside
   the price table shows tokens without dollars. The table holds list prices, and the OpenAI bill can
   come out lower: in the measurements it was $8.67 against about $14.03 at list, unexplained.
-  Anthropic ignores `reasoning_effort`.
-- **Paid cache writes are off for `gpt-5.6-sol`, `gpt-6.1-terra` and `gpt-6.1-sol` on `openai`.** A write
+  Anthropic ignores `reasoning_effort`. A price that changes on a known date (`gpt-5.6-sol` from
+  2026-12-01) switches by itself, at the earliest midnight of that day anywhere. A run in which one
+  call carried more than 272,000 input tokens shows no dollars on the models whose higher tier the
+  table knows, because the vendor bills such a call at rates the table does not hold. The verifier
+  sends whole files, so a very large file can get there.
+- **Paid cache writes are off for `gpt-5.6-sol`, `gpt-6.1-terra`, `gpt-6.1-sol` and `gpt-6.2-sol` on `openai`.** A write
   costs 25% over input and only an identical request reads it back: on a measured next head nothing
   was read. So a rerun of the workflow on the same head pays the full price. Another model with a
   write tariff, such as `gpt-6-astra`, keeps writing, and the spend line counts it.
@@ -460,8 +473,9 @@ What release 1 has and has not proved, from the spec's claim → evidence table 
 
 ## Releasing (for the owner)
 
-1. Before merging: compare `PRICES` and `PRICES_CHECKED_ON` in `src/pr-review/usage.ts` with the
-   providers' current prices, and run `node dist/cli.js pr-review --replay <n>` from a local build
+1. Before merging: compare `PRICES`, `PRICE_CHANGES` and `PRICES_CHECKED_ON` in
+   `src/pr-review/usage.ts` with the providers' current prices, including any announced end of a
+   promotion, and run `node dist/cli.js pr-review --replay <n>` from a local build
    for each of the three providers. A provider whose answer does not pass the schema is marked
    unsupported in this README.
 2. Merge to `main`, then tag `v<version>` (the version in `package.json`) on the merged commit.
