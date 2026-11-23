@@ -210,7 +210,7 @@ describe('pr-review in CI', () => {
   it('ignores AI_REVIEW_MODEL in CI: the model comes from the base', async () => {
     const h = harness({ env: { AI_REVIEW_MODEL: 'evil', AI_REVIEW_VERIFY_MODEL: 'evil' } });
     expect(await prReview([], h.io)).toBe(EXIT.ok);
-    expect(modelOf(modelCalls(h.calls)[0]!)).toBe('gpt-5.6-sol');
+    expect(modelOf(modelCalls(h.calls)[0]!)).toBe('gpt-6.2-sol');
   });
 });
 
